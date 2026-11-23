@@ -1,0 +1,114 @@
+[gd_scene format=3 uid="uid://cyn2gma5xjm5y"]
+
+[ext_resource type="Script" path="res://scripts/camera_controller.gd" id="1_cam"]
+[ext_resource type="Script" path="res://scripts/grid_drawer.gd" id="2_grid"]
+[ext_resource type="Script" path="res://scripts/city_manager.gd" id="3_city"]
+[ext_resource type="Script" path="res://scripts/car_controller.gd" id="4_car"]
+[ext_resource type="PackedScene" uid="uid://b6r0wex4k1m8n" path="res://scenes/hud.tscn" id="5_hud"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.35, 0.65, 0.95, 1)
+sky_horizon_color = Color(0.75, 0.85, 0.95, 1)
+ground_bottom_color = Color(0.2, 0.3, 0.2, 1)
+ground_horizon_color = Color(0.7, 0.8, 0.7, 1)
+
+[sub_resource type="Sky" id="Sky_env"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_env")
+ambient_light_source = 3
+ambient_light_color = Color(0.55, 0.58, 0.62, 1)
+ambient_light_sky_contribution = 0.5
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.28, 0.58, 0.25, 1)
+roughness = 0.9
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
+material = SubResource("StandardMaterial3D_ground")
+size = Vector2(32, 32)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_trunk"]
+albedo_color = Color(0.42, 0.26, 0.15, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_trunk"]
+material = SubResource("StandardMaterial3D_trunk")
+size = Vector3(0.5, 2, 0.5)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_foliage"]
+albedo_color = Color(0.18, 0.65, 0.22, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_foliage"]
+material = SubResource("StandardMaterial3D_foliage")
+size = Vector3(1.8, 1.8, 1.8)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rock"]
+albedo_color = Color(0.5, 0.52, 0.55, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_rock"]
+material = SubResource("StandardMaterial3D_rock")
+size = Vector3(1.5, 1, 1.2)
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.819152, -0.40558, 0.40558, 0, 0.707107, 0.707107, -0.573576, -0.579228, 0.579228, 0, 15, 0)
+shadow_enabled = true
+light_energy = 1.15
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0, 16)
+mesh = SubResource("PlaneMesh_ground")
+
+[node name="GridLines" type="MeshInstance3D" parent="."]
+script = ExtResource("2_grid")
+
+[node name="Props" type="Node3D" parent="."]
+
+[node name="SampleTree" type="Node3D" parent="Props"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0, 8)
+
+[node name="Trunk" type="MeshInstance3D" parent="Props/SampleTree"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("BoxMesh_trunk")
+
+[node name="Foliage" type="MeshInstance3D" parent="Props/SampleTree"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.6, 0)
+mesh = SubResource("BoxMesh_foliage")
+
+[node name="SampleRock" type="Node3D" parent="Props"]
+transform = Transform3D(0.921061, -0.197369, 0.335504, 0.165203, 0.978253, 0.121876, -0.352277, -0.0567946, 0.934175, 35, 0, 18)
+
+[node name="RockMesh" type="MeshInstance3D" parent="Props/SampleRock"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+mesh = SubResource("BoxMesh_rock")
+
+[node name="CameraPivot" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0, 16)
+script = ExtResource("1_cam")
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 22)
+current = true
+fov = 45.0
+
+[node name="CityManager" type="Node3D" parent="." node_paths=PackedStringArray("camera_controller")]
+script = ExtResource("3_city")
+camera_controller = NodePath("../CameraPivot")
+
+[node name="TilesRoot" type="Node3D" parent="CityManager"]
+
+[node name="CarController" type="Node3D" parent="CityManager"]
+script = ExtResource("4_car")
+
+[node name="HUD" parent="." node_paths=PackedStringArray("city_manager") instance=ExtResource("5_hud")]
+city_manager = NodePath("../CityManager")
