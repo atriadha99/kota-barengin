@@ -1,7 +1,7 @@
 class_name CityData
 extends RefCounted
 
-## Konstanta dan data dasar kota KotaBarengin (Phase 1)
+## Konstanta dan data dasar kota KotaBarengin (Phase 1 - Langkah 3)
 const GRID_SIZE: int = 16
 const TILE_SIZE: float = 2.0
 const MAP_SIZE: float = float(GRID_SIZE) * TILE_SIZE # 32.0 meter
@@ -25,7 +25,7 @@ enum BuildingZone {
 	INDUSTRIAL
 }
 
-# Biaya pembuatan tile (Rp)
+# Biaya pembelian awal (Rp)
 const COST_ROAD: int = 5000
 const COST_ZONE_R: int = 2000
 const COST_ZONE_C: int = 2000
@@ -33,6 +33,30 @@ const COST_ZONE_I: int = 2000
 const COST_BULLDOZER: int = 0
 const COST_POWER_PLANT: int = 50000
 const COST_WATER_TOWER: int = 30000
+const COST_PARK: int = 10000
+const COST_FARM: int = 15000
+
+# Panen & Pertanian (Langkah 4)
+const WHEAT_PER_HARVEST: int = 10
+var wheat_inventory: int = 0
+var wheat_price: int = 1200 # Acak Rp 800 - Rp 1.500 / unit
+
+# Biaya perawatan / upkeep bulanan (Rp/bulan)
+const UPKEEP_POWER_PLANT: int = 2000
+const UPKEEP_WATER_TOWER: int = 1500
+const UPKEEP_PARK: int = 500
+
+# Kapasitas supply per unit
+const SUPPLY_POWER_PER_PLANT: int = 100
+const SUPPLY_WATER_PER_TOWER: int = 100
+
+# Kebutuhan utilitas per tipe bangunan
+const USAGE_R_POWER: int = 1
+const USAGE_R_WATER: int = 1
+const USAGE_C_POWER: int = 2
+const USAGE_C_WATER: int = 2
+const USAGE_I_POWER: int = 3
+const USAGE_I_WATER: int = 3
 
 # State kota
 var money: int = 150000
@@ -40,17 +64,27 @@ var population: int = 0
 var month: int = 1
 var year: int = 1
 
+# Ekonomi & Pajak (Langkah 3)
+var tax_rate: float = 0.08 # 8% default (5% - 13%)
+var happiness: float = 70.0 # 0 - 100 (mulai 70)
+var city_level: String = "Desa"
+var game_speed: float = 1.0 # 0.0 (Pause), 1.0 (1x), 3.0 (3x)
+
+var power_supply: int = 0
+var power_used: int = 0
+var water_supply: int = 0
+var water_used: int = 0
+
 # Demand RCI (0.0 - 100.0)
 var demand_r: float = 85.0
 var demand_c: float = 25.0
 var demand_i: float = 45.0
 
-# Pelacakan pertumbuhan populasi 2 bulan berturut-turut untuk upgrade bangunan
+# Pelacakan pertumbuhan populasi untuk upgrade bangunan & level kota
 var consecutive_growth_months: int = 0
 var prev_population: int = 0
 
-# Data grid tile: array 16x16
-# Format tiap tile: { "type": TileType, "level": int (0..3), "zone": BuildingZone }
+# Data grid tile 16x16: { "type": TileType, "level": int (0..3), "zone": BuildingZone, "has_utility": bool }
 var tiles: Array = []
 
 func _init() -> void:
@@ -64,7 +98,8 @@ func reset_grid() -> void:
 			row.append({
 				"type": TileType.EMPTY,
 				"level": 0,
-				"zone": BuildingZone.RESIDENTIAL
+				"zone": BuildingZone.RESIDENTIAL,
+				"has_utility": true
 			})
 		tiles.append(row)
 
@@ -79,7 +114,8 @@ func set_tile(x: int, y: int, type: TileType, level: int = 0, zone: BuildingZone
 	tiles[y][x] = {
 		"type": type,
 		"level": level,
-		"zone": zone
+		"zone": zone,
+		"has_utility": true
 	}
 
 static func tile_to_world_pos(x: int, y: int) -> Vector3:
@@ -93,7 +129,7 @@ func is_valid_tile(x: int, y: int) -> bool:
 
 ## Cek apakah tile bersebelahan dengan Jalan (4 arah mata angin)
 func has_adjacent_road(x: int, y: int) -> bool:
-	var neighbors = [
+	var neighbors: Array[Vector2i] = [
 		Vector2i(x + 1, y),
 		Vector2i(x - 1, y),
 		Vector2i(x, y + 1),
@@ -105,25 +141,143 @@ func has_adjacent_road(x: int, y: int) -> bool:
 				return true
 	return false
 
-## Hitung utilitas di Langkah 2: cukup jika ada min 1 Pembangkit & 1 Menara Air
-func has_utilities() -> bool:
-	var has_power: bool = false
-	var has_water: bool = false
+## Hitung total utilitas dan tandai bangunan yang kebagian / kekurangan
+func update_utilities() -> void:
+	var plant_count := 0
+	var tower_count := 0
+
 	for y in range(GRID_SIZE):
 		for x in range(GRID_SIZE):
 			var t: int = tiles[y][x].get("type", TileType.EMPTY)
 			if t == TileType.POWER_PLANT:
-				has_power = true
+				plant_count += 1
 			elif t == TileType.WATER_TOWER:
-				has_water = true
-			if has_power and has_water:
-				return true
-	return false
+				tower_count += 1
 
-func count_tile_type(type: TileType) -> int:
-	var count: int = 0
+	power_supply = plant_count * SUPPLY_POWER_PER_PLANT
+	water_supply = tower_count * SUPPLY_WATER_PER_TOWER
+
+	var current_power_used := 0
+	var current_water_used := 0
+
+	# Iterasi semua bangunan untuk alokasi supply
 	for y in range(GRID_SIZE):
 		for x in range(GRID_SIZE):
-			if tiles[y][x].get("type", TileType.EMPTY) == type:
-				count += 1
-	return count
+			var tile: Dictionary = tiles[y][x]
+			var level: int = tile.get("level", 0)
+			if level > 0:
+				var zone: int = tile.get("zone", BuildingZone.RESIDENTIAL)
+				var req_p := USAGE_R_POWER
+				var req_w := USAGE_R_WATER
+				if zone == BuildingZone.COMMERCIAL:
+					req_p = USAGE_C_POWER
+					req_w = USAGE_C_WATER
+				elif zone == BuildingZone.INDUSTRIAL:
+					req_p = USAGE_I_POWER
+					req_w = USAGE_I_WATER
+
+				# Tambahkan ke total pemakaian
+				current_power_used += req_p
+				current_water_used += req_w
+
+				# Cek apakah bangunan ini teraliri listrik & air
+				if current_power_used <= power_supply and current_water_used <= water_supply:
+					tile["has_utility"] = true
+				else:
+					tile["has_utility"] = false
+			else:
+				tile["has_utility"] = true
+
+	power_used = current_power_used
+	water_used = current_water_used
+
+## Cek apakah supply listrik dan air masih mencukupi untuk pertambahan
+func can_supply_new_building(zone_type: int) -> bool:
+	var req_p := USAGE_R_POWER
+	var req_w := USAGE_R_WATER
+	if zone_type == BuildingZone.COMMERCIAL:
+		req_p = USAGE_C_POWER
+		req_w = USAGE_C_WATER
+	elif zone_type == BuildingZone.INDUSTRIAL:
+		req_p = USAGE_I_POWER
+		req_w = USAGE_I_WATER
+
+	return (power_used + req_p <= power_supply) and (water_used + req_w <= water_supply)
+
+## Cek apakah ada taman di dekat koordinat (jarak <= 3 tile)
+func has_nearby_park(cx: int, cy: int, max_dist: int = 3) -> bool:
+	for dy in range(-max_dist, max_dist + 1):
+		for dx in range(-max_dist, max_dist + 1):
+			var nx := cx + dx
+			var ny := cy + dy
+			if is_valid_tile(nx, ny):
+				if tiles[ny][nx].get("type", TileType.EMPTY) == TileType.PARK:
+					return true
+	return false
+
+## Hitung tingkat kebahagiaan kota (0 - 100)
+func calculate_happiness() -> float:
+	var base: float = 70.0
+
+	# 1. Pengaruh Pajak: Default 8% netral. Tiap 1% di atas 8% mengurangi 3 kebahagiaan.
+	var tax_diff := (tax_rate - 0.08) * 100.0
+	base -= tax_diff * 3.5
+
+	# 2. Pengaruh Utilitas: Jika ada defisit listrik atau air, kurangi drastis
+	if power_used > power_supply:
+		var deficit_ratio := float(power_used - power_supply) / float(maxi(1, power_used))
+		base -= deficit_ratio * 30.0
+	if water_used > water_supply:
+		var deficit_ratio := float(water_used - water_supply) / float(maxi(1, water_used))
+		base -= deficit_ratio * 30.0
+
+	# 3. Pengaruh Taman di dekat perumahan (+ bonus kebahagiaan)
+	var house_count := 0
+	var happy_house_count := 0
+	for y in range(GRID_SIZE):
+		for x in range(GRID_SIZE):
+			var tile: Dictionary = tiles[y][x]
+			if tile.get("level", 0) > 0 and tile.get("zone", BuildingZone.RESIDENTIAL) == BuildingZone.RESIDENTIAL:
+				house_count += 1
+				if has_nearby_park(x, y, 3):
+					happy_house_count += 1
+
+	if house_count > 0:
+		var park_ratio := float(happy_house_count) / float(house_count)
+		base += park_ratio * 18.0
+
+	# 4. Pengaruh Pengangguran
+	# Pekerjaan dari Komersial (8/toko) + Industri (12/pabrik)
+	var c_count := 0
+	var i_count := 0
+	for y in range(GRID_SIZE):
+		for x in range(GRID_SIZE):
+			var tile: Dictionary = tiles[y][x]
+			if tile.get("level", 0) > 0:
+				var z: int = tile.get("zone", BuildingZone.RESIDENTIAL)
+				if z == BuildingZone.COMMERCIAL:
+					c_count += tile.get("level", 1)
+				elif z == BuildingZone.INDUSTRIAL:
+					i_count += tile.get("level", 1)
+
+	var total_jobs := c_count * 8 + i_count * 12
+	if population > 0 and population > total_jobs:
+		var unemployed := population - total_jobs
+		var unemp_ratio := float(unemployed) / float(population)
+		if unemp_ratio > 0.2:
+			base -= (unemp_ratio - 0.2) * 35.0
+
+	return clampf(base, 0.0, 100.0)
+
+## Nama level kota berdasarkan populasi
+static func get_city_tier(pop: int) -> String:
+	if pop >= 5000:
+		return "Metropolis"
+	elif pop >= 1500:
+		return "Kota Besar"
+	elif pop >= 500:
+		return "Kota"
+	elif pop >= 100:
+		return "Kota Kecil"
+	else:
+		return "Desa"

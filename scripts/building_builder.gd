@@ -36,6 +36,10 @@ static func create_tile_node(type: CityData.TileType, level: int = 0, zone: City
 			root.add_child(_create_power_plant_mesh())
 		CityData.TileType.WATER_TOWER:
 			root.add_child(_create_water_tower_mesh())
+		CityData.TileType.PARK:
+			root.add_child(_create_park_mesh())
+		CityData.TileType.FARM:
+			root.add_child(_create_farm_mesh(level))
 
 	return root
 
@@ -382,3 +386,115 @@ static func _create_water_tower_mesh() -> Node3D:
 	tank.position = Vector3(0.0, 1.7, 0.0)
 	node.add_child(tank)
 	return node
+
+## --- PERTANIAN GANDUM (3 Tahap: Benih -> Tumbuh -> Siap Panen) ---
+static func _create_farm_mesh(stage: int) -> Node3D:
+	var node := Node3D.new()
+
+	# Tanah gembur pertanian berpetak
+	var soil := MeshInstance3D.new()
+	var soil_box := BoxMesh.new()
+	soil_box.size = Vector3(1.9, 0.04, 1.9)
+	var soil_mat := StandardMaterial3D.new()
+	soil_mat.albedo_color = Color(0.38, 0.24, 0.14) # Coklat tanah gembur
+	soil_mat.roughness = 0.95
+	soil.mesh = soil_box
+	soil.position = Vector3(0.0, 0.02, 0.0)
+	node.add_child(soil)
+
+	# Alur bajak tanah (furrows)
+	for fz in [-0.5, 0.0, 0.5]:
+		var ridge := MeshInstance3D.new()
+		var ridge_box := BoxMesh.new()
+		ridge_box.size = Vector3(1.8, 0.03, 0.25)
+		var ridge_mat := StandardMaterial3D.new()
+		ridge_mat.albedo_color = Color(0.28, 0.17, 0.10)
+		ridge.mesh = ridge_box
+		ridge.position = Vector3(0.0, 0.04, fz)
+		node.add_child(ridge)
+
+	var safe_stage := clampi(stage, 1, 3)
+
+	if safe_stage == 1:
+		# Tahap 1: Benih (tunas hijau kecil)
+		var sprout_mat := StandardMaterial3D.new()
+		sprout_mat.albedo_color = Color(0.35, 0.82, 0.25)
+		for fz in [-0.5, 0.0, 0.5]:
+			for fx in [-0.6, -0.2, 0.2, 0.6]:
+				var sp := MeshInstance3D.new()
+				var sp_box := BoxMesh.new()
+				sp_box.size = Vector3(0.08, 0.14, 0.08)
+				sp.mesh = sp_box
+				sp.material_override = sprout_mat
+				sp.position = Vector3(fx, 0.08, fz)
+				node.add_child(sp)
+
+	elif safe_stage == 2:
+		# Tahap 2: Tumbuh (tanaman hijau setengah tinggi)
+		var plant_mat := StandardMaterial3D.new()
+		plant_mat.albedo_color = Color(0.22, 0.68, 0.24)
+		for fz in [-0.5, 0.0, 0.5]:
+			for fx in [-0.5, 0.0, 0.5]:
+				var stalk := MeshInstance3D.new()
+				var stalk_box := BoxMesh.new()
+				stalk_box.size = Vector3(0.25, 0.45, 0.25)
+				stalk.mesh = stalk_box
+				stalk.material_override = plant_mat
+				stalk.position = Vector3(fx, 0.25, fz)
+				node.add_child(stalk)
+
+	else:
+		# Tahap 3: Siap Panen (gandum kuning tinggi + bulir emas jelas dari jauh)
+		var wheat_mat := StandardMaterial3D.new()
+		wheat_mat.albedo_color = Color(0.95, 0.78, 0.18) # Kuning keemasan
+
+		for fz in [-0.5, 0.0, 0.5]:
+			for fx in [-0.5, 0.0, 0.5]:
+				var stalk := MeshInstance3D.new()
+				var stalk_box := BoxMesh.new()
+				stalk_box.size = Vector3(0.24, 0.85, 0.24)
+				stalk.mesh = stalk_box
+				stalk.material_override = wheat_mat
+				stalk.position = Vector3(fx, 0.46, fz)
+				node.add_child(stalk)
+
+				var head := MeshInstance3D.new()
+				var head_prism := PrismMesh.new()
+				head_prism.size = Vector3(0.3, 0.35, 0.3)
+				var head_mat := StandardMaterial3D.new()
+				head_mat.albedo_color = Color(1.0, 0.88, 0.25)
+				head.mesh = head_prism
+				head.material_override = head_mat
+				head.position = Vector3(fx, 0.95, fz)
+				node.add_child(head)
+
+		# Ikon visual "SIAP PANEN" kuning keemasan melayang di atas lahan
+		var ready_badge := MeshInstance3D.new()
+		var badge_box := BoxMesh.new()
+		badge_box.size = Vector3(0.4, 0.4, 0.4)
+		var badge_mat := StandardMaterial3D.new()
+		badge_mat.albedo_color = Color(1.0, 0.85, 0.1)
+		badge_mat.emission_enabled = true
+		badge_mat.emission = Color(1.0, 0.85, 0.1)
+		badge_mat.emission_energy_multiplier = 1.6
+		badge_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ready_badge.mesh = badge_box
+		ready_badge.rotation_degrees = Vector3(45, 45, 0)
+		ready_badge.position = Vector3(0.0, 1.45, 0.0)
+		node.add_child(ready_badge)
+
+	return node
+
+## Popup melayang "+10 Gandum" saat lahan dipanen
+static func create_harvest_popup(amount: int) -> Label3D:
+	var label := Label3D.new()
+	label.text = "+%d Gandum" % amount
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.font_size = 32
+	label.modulate = Color(1.0, 0.92, 0.25)
+	label.outline_render_priority = 1
+	label.outline_size = 4
+	label.outline_modulate = Color(0.1, 0.1, 0.1)
+	label.no_depth_test = true
+	label.position = Vector3(0.0, 1.6, 0.0)
+	return label
