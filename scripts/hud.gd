@@ -440,7 +440,40 @@ func open_citizen_profile_dialog(c_info: Dictionary, comp_info: Dictionary) -> v
 			label_cp_complaint.visible = false
 			btn_cp_open_th.visible = false
 
+	_update_citizen_traffic_buttons(comp_info.get("type", "") == ComplaintsData.COMPLAINT_TRAFFIC)
+
 	citizen_modal.visible = true
+
+func _update_citizen_traffic_buttons(is_traffic: bool) -> void:
+	if not citizen_modal:
+		return
+	var box := citizen_modal.get_node_or_null("TrafficSolBox") as HBoxContainer
+	if not box and btn_cp_open_th and btn_cp_open_th.get_parent():
+		box = HBoxContainer.new()
+		box.name = "TrafficSolBox"
+		box.add_theme_constant_override("separation", 8)
+		var b_widen := Button.new()
+		b_widen.text = "Lebarin Jalan (Rp3.000/tile)"
+		b_widen.add_theme_font_size_override("font_size", 12)
+		UIThemeHelper.apply_btn_secondary(b_widen, 36.0)
+		b_widen.pressed.connect(func():
+			citizen_modal.visible = false
+			_select_tool(CityManager.ToolMode.WIDEN_ROAD)
+		)
+		var b_fly := Button.new()
+		b_fly.text = "Bikin Flyover (Rp20.000/tile, Pop 500)"
+		b_fly.add_theme_font_size_override("font_size", 12)
+		UIThemeHelper.apply_btn_secondary(b_fly, 36.0)
+		b_fly.pressed.connect(func():
+			citizen_modal.visible = false
+			_select_tool(CityManager.ToolMode.FLYOVER)
+		)
+		box.add_child(b_widen)
+		box.add_child(b_fly)
+		btn_cp_open_th.get_parent().add_child(box)
+		btn_cp_open_th.get_parent().move_child(box, btn_cp_open_th.get_index())
+	if box:
+		box.visible = is_traffic
 
 func open_townhall_dialog() -> void:
 	if not townhall_modal:

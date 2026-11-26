@@ -136,6 +136,16 @@ static func save_season2(data: CityData) -> bool:
 	cfg.set_value("city", "fire_cooldown_months", data.fire_cooldown_months)
 	cfg.set_value("city", "active_fire", data.active_fire.duplicate(true))
 	cfg.set_value("city", "public_buildings", data.get_public_buildings_list())
+	cfg.set_value("city", "military_zones", data.get_military_zones_list())
+	cfg.set_value("city", "transport", {
+		"bus_kopaja": data.bus_kopaja_count,
+		"busway": data.busway_count
+	})
+	cfg.set_value("city", "wide_roads", data.wide_roads.keys())
+	cfg.set_value("city", "flyovers", data.flyovers.keys())
+	cfg.set_value("city", "airport", {
+		"airplanes": data.airplane_count
+	})
 
 	var err := cfg.save(SAVE_SEASON2_PATH)
 	return err == OK
