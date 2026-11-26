@@ -121,14 +121,15 @@ static func save_season2(data: CityData) -> bool:
 					t_type,
 					t.get("level", 0),
 					t.get("zone", CityData.BuildingZone.RESIDENTIAL),
-					t.get("rotation", 0)
+					t.get("rotation", 0),
+					str(t.get("road_shape", "lurus"))
 				])
 	# Simpan tile di wilayah perluasan
 	var extra_arr: Array = []
 	for k in data.extra_tiles.keys():
 		var tv: Dictionary = data.extra_tiles[k]
 		if tv.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY:
-			extra_arr.append([k.x, k.y, tv.get("type", 0), tv.get("level", 0), tv.get("zone", 0), tv.get("rotation", 0)])
+			extra_arr.append([k.x, k.y, tv.get("type", 0), tv.get("level", 0), tv.get("zone", 0), tv.get("rotation", 0), str(tv.get("road_shape", "lurus"))])
 	cfg.set_value("tiles", "extra_tiles", extra_arr)
 	cfg.set_value("tiles", "power_cables", data.power_cables.keys())
 	cfg.set_value("tiles", "water_pipes", data.water_pipes.keys())
@@ -257,13 +258,15 @@ static func load_season2(data: CityData) -> bool:
 				var arr = cfg.get_value("tiles", key, null)
 				if arr is Array and arr.size() >= 3:
 					var rot: int = int(arr[3]) if arr.size() >= 4 else 0
-					data.set_tile(x, y, int(arr[0]), int(arr[1]), int(arr[2]), rot)
+					var rshape: String = str(arr[4]) if arr.size() >= 5 else "lurus"
+					data.set_tile(x, y, int(arr[0]), int(arr[1]), int(arr[2]), rot, rshape)
 	var extra_loaded = cfg.get_value("tiles", "extra_tiles", [])
 	if extra_loaded is Array:
 		for item in extra_loaded:
 			if item is Array and item.size() >= 5:
 				var rot: int = int(item[5]) if item.size() >= 6 else 0
-				data.set_tile(int(item[0]), int(item[1]), int(item[2]), int(item[3]), int(item[4]), rot)
+				var rshape: String = str(item[6]) if item.size() >= 7 else "lurus"
+				data.set_tile(int(item[0]), int(item[1]), int(item[2]), int(item[3]), int(item[4]), rot, rshape)
 
 	# Muat kabel & pipa (save lama tanpa key dianggap tersambung otomatis)
 	if cfg.has_section_key("tiles", "power_cables"):

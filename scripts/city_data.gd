@@ -313,7 +313,8 @@ func reset_grid() -> void:
 				"level": 0,
 				"zone": BuildingZone.RESIDENTIAL,
 				"has_utility": true,
-				"rotation": 0
+				"rotation": 0,
+				"road_shape": "lurus"
 			})
 		tiles.append(row)
 
@@ -323,15 +324,16 @@ func get_tile(x: int, y: int) -> Dictionary:
 	var k := Vector2i(x, y)
 	if extra_tiles.has(k):
 		return extra_tiles[k]
-	return { "type": TileType.EMPTY, "level": 0, "zone": BuildingZone.RESIDENTIAL, "has_utility": true, "rotation": 0 }
+	return { "type": TileType.EMPTY, "level": 0, "zone": BuildingZone.RESIDENTIAL, "has_utility": true, "rotation": 0, "road_shape": "lurus" }
 
-func set_tile(x: int, y: int, type: TileType, level: int = 0, zone: BuildingZone = BuildingZone.RESIDENTIAL, rotation: int = 0) -> void:
+func set_tile(x: int, y: int, type: TileType, level: int = 0, zone: BuildingZone = BuildingZone.RESIDENTIAL, rotation: int = 0, road_shape: String = "lurus") -> void:
 	var d := {
 		"type": type,
 		"level": level,
 		"zone": zone,
 		"has_utility": true,
-		"rotation": ((rotation % 360) + 360) % 360
+		"rotation": ((rotation % 360) + 360) % 360,
+		"road_shape": road_shape
 	}
 	if x >= 0 and x < GRID_SIZE and y >= 0 and y < GRID_SIZE:
 		tiles[y][x] = d

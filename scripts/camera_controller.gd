@@ -4,6 +4,7 @@ extends Node3D
 ## Kontroler Kamera Orbit, Zoom, Pan (Mouse/Keyboard + Sentuh Android)
 signal tile_clicked(screen_pos: Vector2)
 signal tile_long_pressed(screen_pos: Vector2)
+signal tile_dragged(screen_pos: Vector2)
 
 @export var min_pitch: float = 30.0
 @export var max_pitch: float = 60.0
@@ -183,6 +184,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			pitch = clampf(pitch - mm.relative.y * orbit_sensitivity, min_pitch, max_pitch)
 			_update_transform()
 		elif lmb_pressed:
+			if Input.is_key_pressed(KEY_SHIFT):
+				is_panning = true
+				tile_dragged.emit(mm.position)
+				return
 			# Jika digeser lebih dari 5 pixel dari posisi awal tekan, mulai pan kamera
 			if not is_panning:
 				if mm.position.distance_to(lmb_down_pos) > 5.0:

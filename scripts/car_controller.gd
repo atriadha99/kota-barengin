@@ -5,6 +5,7 @@ extends Node3D
 
 class SimpleCar:
 	var node: Node3D
+	var prev_tile: Vector2i = Vector2i(-1, -1)
 	var current_tile: Vector2i = Vector2i(-1, -1)
 	var target_tile: Vector2i = Vector2i(-1, -1)
 	var progress: float = 0.0
@@ -97,8 +98,9 @@ func _process(delta: float) -> void:
 		if not car.active or not _is_road(car.current_tile) or not _is_road(car.target_tile):
 			# Respawn mobil di salah satu tile jalan acak
 			var start_tile: Vector2i = road_tiles[(i * 3 + randi()) % road_tiles.size()]
+			car.prev_tile = start_tile
 			car.current_tile = start_tile
-			car.target_tile = _pick_next_road(start_tile, Vector2i.ZERO)
+			car.target_tile = _pick_next_road(car.current_tile, Vector2i.ZERO)
 			car.progress = 0.0
 			car.active = true
 			car.node.visible = true
@@ -108,24 +110,27 @@ func _process(delta: float) -> void:
 		car.progress += car.speed * speed_multiplier * flood_slow * light_mult * delta
 		if car.progress >= 1.0:
 			car.progress = 0.0
-			var prev_tile := car.current_tile
+			car.prev_tile = car.current_tile
 			car.current_tile = car.target_tile
-			var move_dir := car.target_tile - prev_tile
+			var move_dir := car.current_tile - car.prev_tile
 			car.target_tile = _pick_next_road(car.current_tile, move_dir)
 
-		# Interpolasi posisi
-		var p1 := CityData.tile_to_world_pos(car.current_tile.x, car.current_tile.y)
-		var p2 := CityData.tile_to_world_pos(car.target_tile.x, car.target_tile.y)
-		var cur_pos := p1.lerp(p2, car.progress)
+		# Kurva Bezier halus agar mobil belok mengikuti tikungan & persimpangan
+		var p_mid := CityData.tile_to_world_pos(car.current_tile.x, car.current_tile.y)
+		var p_in := CityData.tile_to_world_pos(car.prev_tile.x, car.prev_tile.y).lerp(p_mid, 0.5) if _is_road(car.prev_tile) else p_mid
+		var p_out := p_mid.lerp(CityData.tile_to_world_pos(car.target_tile.x, car.target_tile.y), 0.5)
+		var q0 := p_in.lerp(p_mid, car.progress)
+		var q1 := p_mid.lerp(p_out, car.progress)
+		var cur_pos := q0.lerp(q1, car.progress)
 		var on_flyover: bool = city_data.flyovers.has(car.current_tile) or city_data.flyovers.has(car.target_tile)
 		cur_pos.y = 1.08 if on_flyover else 0.04
 		car.node.global_position = cur_pos
 
-		# Rotasi menghadap arah jalan
-		var dir := (p2 - p1).normalized()
+		# Rotasi halus mengikuti arah tikungan
+		var dir := (q1 - q0).normalized()
 		if dir.length_squared() > 0.001:
 			var target_rot_y := atan2(-dir.x, -dir.z)
-			car.node.rotation.y = target_rot_y
+			car.node.rotation.y = lerp_angle(car.node.rotation.y, target_rot_y, clampf(delta * 10.0, 0.0, 1.0))
 
 	_process_transit(delta, road_tiles)
 	_process_airplanes(delta)

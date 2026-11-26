@@ -131,13 +131,83 @@ static func _create_road_mesh() -> Node3D:
 static func create_intersection_props_node(is_green: bool = true) -> Node3D:
 	var node := Node3D.new()
 	node.name = "IntersectionProps"
-	# Zebra cross di persimpangan
-	for sx in [-0.45, -0.15, 0.15, 0.45]:
-		_add_box(node, Vector3(0.14, 0.038, 0.36), Vector3(sx, 0.022, 0.72), Color(0.94, 0.94, 0.94))
-	# Tiang lampu lalu lintas mini di sudut
 	_add_box(node, Vector3(0.06, 0.65, 0.06), Vector3(0.78, 0.33, 0.78), Color(0.25, 0.26, 0.30))
 	var lamp := _add_box(node, Vector3(0.14, 0.18, 0.14), Vector3(0.78, 0.72, 0.78), Color(0.20, 0.92, 0.30) if is_green else Color(0.95, 0.22, 0.20), true)
 	lamp.name = "TrafficLamp"
+	return node
+
+static func create_road_node(shape: String, is_wide: bool = false, is_green: bool = true) -> Node3D:
+	var node := Node3D.new()
+	var w_asp: float = 1.86 if is_wide else 1.62
+	var asp_col := Color(0.18, 0.19, 0.21)
+	var line_col := Color(0.96, 0.85, 0.25) if is_wide else Color(0.92, 0.92, 0.90)
+
+	# Trotoar dasar
+	_add_box(node, Vector3(2.0, 0.025, 2.0), Vector3(0.0, 0.012, 0.0), Color(0.45, 0.47, 0.50))
+
+	if shape == "tikungan":
+		# L-turn: Utara (z=-1) ke Timur (x=+1)
+		var arm_len: float = 1.0 + w_asp * 0.5
+		_add_box(node, Vector3(w_asp, 0.032, arm_len), Vector3(0.0, 0.016, -1.0 + arm_len * 0.5), asp_col)
+		_add_box(node, Vector3(arm_len, 0.032, w_asp), Vector3(1.0 - arm_len * 0.5, 0.016, 0.0), asp_col)
+		# Marka tengah melengkung 90 derajat
+		_add_box(node, Vector3(0.10, 0.038, 0.48), Vector3(0.0, 0.021, -0.72), line_col)
+		var mid_seg := _add_box(node, Vector3(0.10, 0.038, 0.42), Vector3(0.22, 0.021, -0.22), line_col)
+		mid_seg.rotation_degrees.y = -45.0
+		_add_box(node, Vector3(0.48, 0.038, 0.10), Vector3(0.72, 0.021, 0.0), line_col)
+		if is_wide:
+			_add_box(node, Vector3(0.05, 0.038, 1.0 + w_asp * 0.5), Vector3(-w_asp * 0.44, 0.021, -1.0 + (1.0 + w_asp * 0.5) * 0.5), Color(0.92, 0.92, 0.92))
+			_add_box(node, Vector3(1.0 + w_asp * 0.5, 0.038, 0.05), Vector3(1.0 - (1.0 + w_asp * 0.5) * 0.5, 0.021, w_asp * 0.44), Color(0.92, 0.92, 0.92))
+	elif shape == "t_junction":
+		# T-junction: Utara + Selatan + Timur
+		_add_box(node, Vector3(w_asp, 0.032, 2.0), Vector3(0.0, 0.016, 0.0), asp_col)
+		_add_box(node, Vector3(1.0, 0.032, w_asp), Vector3(0.5, 0.016, 0.0), asp_col)
+		_add_zebra_leg(node, Vector2(0.0, -0.76), false)
+		_add_zebra_leg(node, Vector2(0.0, 0.76), false)
+		_add_zebra_leg(node, Vector2(0.76, 0.0), true)
+		node.add_child(create_intersection_props_node(is_green))
+	elif shape == "perempatan":
+		# Perempatan 4 arah
+		_add_box(node, Vector3(w_asp, 0.032, 2.0), Vector3(0.0, 0.016, 0.0), asp_col)
+		_add_box(node, Vector3(2.0, 0.032, w_asp), Vector3(0.0, 0.016, 0.0), asp_col)
+		_add_zebra_leg(node, Vector2(0.0, -0.76), false)
+		_add_zebra_leg(node, Vector2(0.0, 0.76), false)
+		_add_zebra_leg(node, Vector2(-0.76, 0.0), true)
+		_add_zebra_leg(node, Vector2(0.76, 0.0), true)
+		node.add_child(create_intersection_props_node(is_green))
+	else:
+		if is_wide:
+			return create_wide_road_mesh()
+		_add_box(node, Vector3(w_asp, 0.032, 2.0), Vector3(0.0, 0.016, 0.0), asp_col)
+		_add_box(node, Vector3(0.10, 0.036, 0.55), Vector3(0.0, 0.020, -0.45), line_col)
+		_add_box(node, Vector3(0.10, 0.036, 0.55), Vector3(0.0, 0.020, 0.45), line_col)
+
+	return node
+
+static func _add_zebra_leg(node: Node3D, pos2: Vector2, rotated_ew: bool) -> void:
+	for s in [-0.45, -0.15, 0.15, 0.45]:
+		if rotated_ew:
+			_add_box(node, Vector3(0.32, 0.038, 0.14), Vector3(pos2.x, 0.022, s), Color(0.94, 0.94, 0.94))
+		else:
+			_add_box(node, Vector3(0.14, 0.038, 0.32), Vector3(s, 0.022, pos2.y), Color(0.94, 0.94, 0.94))
+
+static func create_flyover_node(shape: String) -> Node3D:
+	var node := Node3D.new()
+	var deck_col := Color(0.32, 0.34, 0.38)
+	var rail_col := Color(0.78, 0.80, 0.82)
+	if shape == "tikungan":
+		_add_box(node, Vector3(0.32, 0.90, 0.32), Vector3(-0.65, 0.45, 0.65), Color(0.62, 0.64, 0.68))
+		_add_box(node, Vector3(1.75, 0.16, 1.85), Vector3(0.0, 0.95, -0.08), deck_col)
+		_add_box(node, Vector3(1.85, 0.16, 1.75), Vector3(0.08, 0.95, 0.0), deck_col)
+		_add_box(node, Vector3(0.08, 0.18, 1.85), Vector3(-0.82, 1.05, -0.08), rail_col)
+		_add_box(node, Vector3(1.85, 0.18, 0.08), Vector3(0.08, 1.05, 0.82), rail_col)
+	elif shape == "t_junction" or shape == "perempatan":
+		_add_box(node, Vector3(0.32, 0.90, 0.32), Vector3(-0.65, 0.45, -0.65), Color(0.62, 0.64, 0.68))
+		_add_box(node, Vector3(0.32, 0.90, 0.32), Vector3(0.65, 0.45, 0.65), Color(0.62, 0.64, 0.68))
+		_add_box(node, Vector3(1.75, 0.16, 2.0), Vector3(0.0, 0.95, 0.0), deck_col)
+		_add_box(node, Vector3(2.0, 0.16, 1.75), Vector3(0.0, 0.95, 0.0), deck_col)
+	else:
+		return _create_flyover_mesh()
 	return node
 
 ## --- RESIDENTIAL (3 varian per level) ---

@@ -69,6 +69,7 @@ var _wave_strip: Node3D = null
 var _river_flow: Node3D = null
 var _traffic_timer: float = 0.0
 var _traffic_is_green: bool = true
+var _last_drag_tile: Vector2i = Vector2i(-999, -999)
 
 @onready var tiles_root: Node3D = $TilesRoot
 @onready var car_controller: CarController = $CarController
@@ -127,6 +128,7 @@ func _ready() -> void:
 	if camera_controller:
 		camera_controller.tile_clicked.connect(_on_tile_clicked)
 		camera_controller.tile_long_pressed.connect(_on_tile_long_pressed)
+		camera_controller.tile_dragged.connect(_on_tile_dragged)
 
 	_ensure_townhall_exists()
 	city_data.ensure_citizen_wishes()
@@ -527,6 +529,8 @@ func _apply_tool(x: int, y: int) -> void:
 				city_data.active_fire.clear()
 
 			city_data.set_tile(x, y, CityData.TileType.EMPTY, 0)
+			if cur_type in [CityData.TileType.ROAD, CityData.TileType.FLYOVER, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS]:
+				_recompute_road_and_neighbors(x, y)
 			city_data.update_utilities()
 			_sync_security_bonuses()
 			city_data.happiness = city_data.calculate_happiness()
@@ -754,10 +758,12 @@ func _apply_tool(x: int, y: int) -> void:
 		city_data.power_cables[Vector2i(x, y)] = true
 	elif target_type == CityData.TileType.WATER_TOWER:
 		city_data.water_pipes[Vector2i(x, y)] = true
+	if target_type in [CityData.TileType.ROAD, CityData.TileType.FLYOVER, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS]:
+		_recompute_road_and_neighbors(x, y)
 	city_data.update_utilities()
 	_sync_security_bonuses()
 	city_data.happiness = city_data.calculate_happiness()
-	if target_type in [CityData.TileType.ROAD, CityData.TileType.POWER_PLANT, CityData.TileType.WATER_TOWER] or (target_type in CityData.PUBLIC_BUILDING_TYPES):
+	if target_type in [CityData.TileType.ROAD, CityData.TileType.FLYOVER, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS, CityData.TileType.POWER_PLANT, CityData.TileType.WATER_TOWER] or (target_type in CityData.PUBLIC_BUILDING_TYPES):
 		_refresh_all_visuals()
 	else:
 		_update_tile_visual(x, y)
@@ -1083,9 +1089,16 @@ func _update_tile_visual(x: int, y: int) -> void:
 	var has_util: bool = tile_info.get("has_utility", true)
 
 	var variant: int = absi(x * 7 + y * 13) % 3
-	var node := BuildingBuilder.create_wide_road_mesh() if (type == CityData.TileType.ROAD and city_data.wide_roads.has(key)) else BuildingBuilder.create_tile_node(type, level, zone, has_util, variant)
-	if type == CityData.TileType.ROAD and _count_adjacent_roads(x, y) >= 3:
-		node.add_child(BuildingBuilder.create_intersection_props_node(_traffic_is_green))
+	var rshape: String = str(tile_info.get("road_shape", "lurus"))
+	var node: Node3D = null
+	if type == CityData.TileType.ROAD:
+		node = BuildingBuilder.create_road_node(rshape, city_data.wide_roads.has(key), _traffic_is_green)
+	elif type == CityData.TileType.FLYOVER:
+		node = Node3D.new()
+		node.add_child(BuildingBuilder.create_road_node(rshape, city_data.wide_roads.has(key), _traffic_is_green))
+		node.add_child(BuildingBuilder.create_flyover_node(rshape))
+	else:
+		node = BuildingBuilder.create_tile_node(type, level, zone, has_util, variant)
 	if not city_data.active_fire.is_empty() and city_data.active_fire.get("pos", Vector2i(-1, -1)) == key:
 		var f_state: String = str(city_data.active_fire.get("state", ""))
 		if f_state == "burning":
@@ -1107,8 +1120,10 @@ func _refresh_all_visuals() -> void:
 
 	for y in range(CityData.GRID_SIZE):
 		for x in range(CityData.GRID_SIZE):
+			_recompute_road_shape_at(x, y)
 			_update_tile_visual(x, y)
 	for k in city_data.extra_tiles.keys():
+		_recompute_road_shape_at(k.x, k.y)
 		_update_tile_visual(k.x, k.y)
 	_refresh_underground_visuals()
 
@@ -1960,3 +1975,90 @@ func _update_traffic_lamp_colors() -> void:
 				var sm := lamp.material_override as StandardMaterial3D
 				sm.albedo_color = col
 				sm.emission = col
+
+func _on_tile_dragged(screen_pos: Vector2) -> void:
+	if not (current_tool in [ToolMode.ROAD, ToolMode.FLYOVER, ToolMode.BUSWAY_LANE, ToolMode.RAIL, ToolMode.POWER_CABLE, ToolMode.WATER_PIPE, ToolMode.RUNWAY, ToolMode.WIDEN_ROAD]):
+		return
+	if not camera_controller or not camera_controller.camera:
+		return
+	var cam: Camera3D = camera_controller.camera
+	var ray_origin := cam.project_ray_origin(screen_pos)
+	var ray_dir := cam.project_ray_normal(screen_pos)
+	if abs(ray_dir.y) < 0.0001:
+		return
+	var t: float = -ray_origin.y / ray_dir.y
+	if t <= 0.0:
+		return
+	var tc := CityData.world_pos_to_tile(ray_origin + ray_dir * t)
+	if tc == _last_drag_tile:
+		return
+	_last_drag_tile = tc
+	if city_data.is_valid_tile(tc.x, tc.y):
+		_apply_tool(tc.x, tc.y)
+
+func _is_road_like(x: int, y: int) -> bool:
+	if not city_data.is_valid_tile(x, y):
+		return false
+	var tp: int = city_data.get_tile(x, y).get("type", CityData.TileType.EMPTY)
+	return tp in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS, CityData.TileType.FLYOVER]
+
+func _recompute_road_and_neighbors(x: int, y: int) -> void:
+	_recompute_road_shape_at(x, y)
+	for d: Vector2i in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]:
+		var nx: int = x + d.x
+		var ny: int = y + d.y
+		if city_data.is_valid_tile(nx, ny):
+			_recompute_road_shape_at(nx, ny)
+			_update_tile_visual(nx, ny)
+
+func _recompute_road_shape_at(x: int, y: int) -> void:
+	if not city_data.is_valid_tile(x, y):
+		return
+	var tile: Dictionary = city_data.get_tile(x, y)
+	var tp: int = int(tile.get("type", CityData.TileType.EMPTY))
+	if not (tp in [CityData.TileType.ROAD, CityData.TileType.FLYOVER]):
+		return
+	var n: bool = _is_road_like(x, y - 1)
+	var e: bool = _is_road_like(x + 1, y)
+	var s: bool = _is_road_like(x, y + 1)
+	var w: bool = _is_road_like(x - 1, y)
+	var cnt: int = int(n) + int(e) + int(s) + int(w)
+	var shape: String = "lurus"
+	var rot: int = 0
+	if cnt == 4:
+		shape = "perempatan"
+		rot = 0
+	elif cnt == 3:
+		shape = "t_junction"
+		if not w:
+			rot = 0
+		elif not n:
+			rot = 270
+		elif not e:
+			rot = 180
+		else:
+			rot = 90
+	elif cnt == 2:
+		if n and s:
+			shape = "lurus"
+			rot = 0
+		elif e and w:
+			shape = "lurus"
+			rot = 90
+		elif n and e:
+			shape = "tikungan"
+			rot = 0
+		elif e and s:
+			shape = "tikungan"
+			rot = 270
+		elif s and w:
+			shape = "tikungan"
+			rot = 180
+		else:
+			shape = "tikungan"
+			rot = 90
+	elif cnt == 1:
+		shape = "lurus"
+		rot = 90 if (e or w) else 0
+	tile["road_shape"] = shape
+	tile["rotation"] = rot
