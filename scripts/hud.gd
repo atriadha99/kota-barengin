@@ -1,37 +1,43 @@
 class_name HUD
 extends CanvasLayer
 
-## Mengontrol UI informasi kota, status utilitas detail, kontrol waktu, slider pajak, panel gudang gandum, dan palette tool
+## Mengontrol UI informasi kota, status utilitas detail, kontrol waktu, slider pajak, panel gudang gandum, modal Balai Kota, profil warga, dan dialog Pak Slamet (Langkah 5)
 
 @export var city_manager: CityManager
 
+# Top Panel
 @onready var label_money: Label = $TopPanel/HBox/LabelMoney
 @onready var label_pop: Label = $TopPanel/HBox/LabelPop
 @onready var label_happiness: Label = $TopPanel/HBox/LabelHappiness
+@onready var label_popularity: Label = $TopPanel/HBox/LabelPopularity
 @onready var label_power: Label = $TopPanel/HBox/LabelPower
 @onready var label_water: Label = $TopPanel/HBox/LabelWater
 @onready var label_date: Label = $TopPanel/HBox/LabelDate
 @onready var label_tier: Label = $TopPanel/HBox/LabelTier
+@onready var btn_townhall: Button = $TopPanel/HBox/BtnTownHall
 
+# Right Panel
 @onready var bar_r: ProgressBar = $RightPanel/VBoxRCI/BarR
 @onready var bar_c: ProgressBar = $RightPanel/VBoxRCI/BarC
 @onready var bar_i: ProgressBar = $RightPanel/VBoxRCI/BarI
 
+# Time & Tax Panels
 @onready var btn_pause: Button = $TimeSpeedPanel/HBoxSpeed/BtnPause
 @onready var btn_1x: Button = $TimeSpeedPanel/HBoxSpeed/Btn1x
 @onready var btn_3x: Button = $TimeSpeedPanel/HBoxSpeed/Btn3x
-
 @onready var tax_slider: HSlider = $TaxPanel/VBoxTax/TaxSlider
 @onready var label_tax: Label = $TaxPanel/VBoxTax/LabelTax
 
-# Gudang Pertanian & Jual Gandum (Langkah 4)
+# Gudang Gandum
 @onready var label_wheat: Label = $FarmPanel/VBoxFarm/LabelWheat
 @onready var label_price: Label = $FarmPanel/VBoxFarm/LabelPrice
 @onready var btn_sell_wheat: Button = $FarmPanel/VBoxFarm/BtnSellWheat
 
+# Toast
 @onready var toast_label: Label = $ToastLabel
 @onready var toast_timer: Timer = $ToastTimer
 
+# Bottom Palette
 @onready var btn_road: Button = $BottomPalette/HBox/BtnRoad
 @onready var btn_zone_r: Button = $BottomPalette/HBox/BtnZoneR
 @onready var btn_zone_c: Button = $BottomPalette/HBox/BtnZoneC
@@ -42,6 +48,28 @@ extends CanvasLayer
 @onready var btn_farm: Button = $BottomPalette/HBox/BtnFarm
 @onready var btn_bulldozer: Button = $BottomPalette/HBox/BtnBulldozer
 
+# Modal Dialogs (Langkah 5)
+@onready var pak_slamet_modal: PanelContainer = $PakSlametModal
+@onready var btn_ps_expel: Button = $PakSlametModal/VBox/HBoxActions/BtnExpel
+@onready var btn_ps_parking: Button = $PakSlametModal/VBox/HBoxActions/BtnOfficialParking
+@onready var btn_ps_ignore: Button = $PakSlametModal/VBox/HBoxActions/BtnIgnore
+@onready var btn_ps_close: Button = $PakSlametModal/VBox/BtnClosePS
+
+@onready var townhall_modal: PanelContainer = $TownHallModal
+@onready var th_stats_label: Label = $TownHallModal/VBox/LabelStats
+@onready var th_complaints_container: VBoxContainer = $TownHallModal/VBox/Scroll/VBoxComplaints
+@onready var btn_th_close: Button = $TownHallModal/VBox/BtnCloseTH
+
+@onready var citizen_modal: PanelContainer = $CitizenProfileModal
+@onready var label_cp_name: Label = $CitizenProfileModal/VBox/LabelName
+@onready var label_cp_job: Label = $CitizenProfileModal/VBox/LabelJob
+@onready var label_cp_address: Label = $CitizenProfileModal/VBox/LabelAddress
+@onready var label_cp_traits: Label = $CitizenProfileModal/VBox/LabelTraits
+@onready var label_cp_history: Label = $CitizenProfileModal/VBox/LabelHistory
+@onready var label_cp_complaint: Label = $CitizenProfileModal/VBox/LabelComplaint
+@onready var btn_cp_open_th: Button = $CitizenProfileModal/VBox/HBoxCP/BtnOpenTH
+@onready var btn_cp_close: Button = $CitizenProfileModal/VBox/HBoxCP/BtnCloseCP
+
 var tool_buttons: Dictionary = {}
 var speed_buttons: Dictionary = {}
 
@@ -49,6 +77,9 @@ func _ready() -> void:
 	if city_manager:
 		city_manager.city_updated.connect(_on_city_updated)
 		city_manager.show_toast.connect(_show_toast)
+		city_manager.open_pak_slamet_modal.connect(open_pak_slamet_dialog)
+		city_manager.open_citizen_modal.connect(open_citizen_profile_dialog)
+		city_manager.open_townhall_modal.connect(open_townhall_dialog)
 
 	tool_buttons = {
 		CityManager.ToolMode.ROAD: btn_road,
@@ -72,7 +103,6 @@ func _ready() -> void:
 	btn_farm.pressed.connect(func(): _select_tool(CityManager.ToolMode.FARM))
 	btn_bulldozer.pressed.connect(func(): _select_tool(CityManager.ToolMode.BULLDOZER))
 
-	# Kecepatan waktu
 	speed_buttons = {
 		0.0: btn_pause,
 		1.0: btn_1x,
@@ -82,19 +112,49 @@ func _ready() -> void:
 	btn_1x.pressed.connect(func(): _select_speed(1.0))
 	btn_3x.pressed.connect(func(): _select_speed(3.0))
 
-	# Slider Pajak
 	tax_slider.value_changed.connect(_on_tax_slider_changed)
 	tax_slider.value = 8.0
 	label_tax.text = "Pajak: 8%"
 
-	# Jual Gandum
 	btn_sell_wheat.pressed.connect(func():
 		if city_manager:
 			city_manager.sell_all_wheat()
 	)
 
+	btn_townhall.pressed.connect(open_townhall_dialog)
+
+	# Setup tombol modal Pak Slamet
+	btn_ps_expel.pressed.connect(func():
+		if city_manager and city_manager.pak_slamet_manager:
+			if city_manager.pak_slamet_manager.action_expel():
+				pak_slamet_modal.visible = false
+	)
+	btn_ps_parking.pressed.connect(func():
+		if city_manager and city_manager.pak_slamet_manager:
+			if city_manager.pak_slamet_manager.action_build_official_parking():
+				pak_slamet_modal.visible = false
+	)
+	btn_ps_ignore.pressed.connect(func():
+		if city_manager and city_manager.pak_slamet_manager:
+			city_manager.pak_slamet_manager.action_ignore()
+		pak_slamet_modal.visible = false
+	)
+	btn_ps_close.pressed.connect(func(): pak_slamet_modal.visible = false)
+
+	# Setup tombol Balai Kota & Profil Warga
+	btn_th_close.pressed.connect(func(): townhall_modal.visible = false)
+	btn_cp_close.pressed.connect(func(): citizen_modal.visible = false)
+	btn_cp_open_th.pressed.connect(func():
+		citizen_modal.visible = false
+		open_townhall_dialog()
+	)
+
 	toast_timer.timeout.connect(func(): toast_label.visible = false)
 	toast_label.visible = false
+
+	pak_slamet_modal.visible = false
+	townhall_modal.visible = false
+	citizen_modal.visible = false
 
 	_select_tool(CityManager.ToolMode.ROAD)
 	_select_speed(1.0)
@@ -130,6 +190,7 @@ func _on_tax_slider_changed(val: float) -> void:
 func _on_city_updated(data: CityData) -> void:
 	label_money.text = "Rp " + _format_number(data.money)
 	label_pop.text = "Pop: " + str(data.population)
+
 	label_happiness.text = "Senang: %d%%" % int(round(data.happiness))
 	if data.happiness >= 65.0:
 		label_happiness.modulate = Color(0.3, 0.9, 0.4)
@@ -137,6 +198,14 @@ func _on_city_updated(data: CityData) -> void:
 		label_happiness.modulate = Color(0.9, 0.8, 0.3)
 	else:
 		label_happiness.modulate = Color(1.0, 0.3, 0.3)
+
+	label_popularity.text = "Populer: %d%%" % int(round(data.popularity))
+	if data.popularity >= 65.0:
+		label_popularity.modulate = Color(0.3, 0.85, 0.95)
+	elif data.popularity >= 45.0:
+		label_popularity.modulate = Color(0.95, 0.85, 0.3)
+	else:
+		label_popularity.modulate = Color(1.0, 0.4, 0.4)
 
 	label_power.text = "Listrik: %d/%d" % [data.power_used, data.power_supply]
 	if data.power_used > data.power_supply:
@@ -150,21 +219,193 @@ func _on_city_updated(data: CityData) -> void:
 	else:
 		label_water.modulate = Color(0.9, 0.9, 0.9)
 
-	label_date.text = "Bulan %d, Tahun %d" % [data.month, data.year]
+	label_date.text = "Bulan %d, Th %d" % [data.month, data.year]
 	label_tier.text = "[" + data.city_level + "]"
 
 	bar_r.value = data.demand_r
 	bar_c.value = data.demand_c
 	bar_i.value = data.demand_i
 
-	# Info Gudang Pertanian
 	label_wheat.text = "Gandum: %d unit" % data.wheat_inventory
 	label_price.text = "Harga: Rp %s / unit" % _format_number(data.wheat_price)
+
+	# Update jumlah pengaduan di tombol Balai Kota
+	var complaint_count := data.active_complaints.size()
+	if data.pak_slamet_status.get("state") == "active":
+		complaint_count += 1
+	if complaint_count > 0:
+		btn_townhall.text = "🏛 Balai Kota (%d)" % complaint_count
+		btn_townhall.modulate = Color(1.2, 1.1, 0.4)
+	else:
+		btn_townhall.text = "🏛 Balai Kota"
+		btn_townhall.modulate = Color(1.0, 1.0, 1.0)
+
+	# Jika Balai Kota sedang terbuka, refresh daftarnya
+	if townhall_modal.visible:
+		_refresh_townhall_list()
+
+func open_pak_slamet_dialog() -> void:
+	pak_slamet_modal.visible = true
+
+func open_citizen_profile_dialog(c_info: Dictionary, comp_info: Dictionary) -> void:
+	label_cp_name.text = c_info.get("name", "Warga Kota")
+	label_cp_job.text = "Pekerjaan: " + c_info.get("occupation", "-")
+	label_cp_address.text = "Alamat: " + c_info.get("address", "-")
+	label_cp_traits.text = "Sifat: " + c_info.get("traits", "-")
+
+	var history: Array = c_info.get("history", [])
+	if not history.is_empty():
+		label_cp_history.text = "Catatan: \"" + history[0] + "\""
+	else:
+		label_cp_history.text = "Catatan: Warga biasa yang taat aturan."
+
+	if not comp_info.is_empty():
+		label_cp_complaint.text = "Keluhan Saat Ini: \"" + comp_info.get("quote", "") + "\""
+		label_cp_complaint.visible = true
+		btn_cp_open_th.visible = true
+	else:
+		label_cp_complaint.visible = false
+		btn_cp_open_th.visible = false
+
+	citizen_modal.visible = true
+
+func open_townhall_dialog() -> void:
+	townhall_modal.visible = true
+	_refresh_townhall_list()
+
+func _refresh_townhall_list() -> void:
+	if not city_manager or not city_manager.city_data:
+		return
+
+	var data: CityData = city_manager.city_data
+	th_stats_label.text = "Popularitas: %d%%  |  Kebahagiaan: %d%%  |  Kas: Rp %s" % [
+		int(round(data.popularity)),
+		int(round(data.happiness)),
+		_format_number(data.money)
+	]
+
+	# Bersihkan daftar kartu lama
+	for child in th_complaints_container.get_children():
+		child.queue_free()
+
+	var has_items := false
+
+	# 1. Kartu Parkir Liar Pak Slamet (jika sedang aktif)
+	if data.pak_slamet_status.get("state") == "active":
+		has_items = true
+		var card := _create_complaint_card(
+			"Pak Slamet (Tukang Parkir)",
+			"Jl. Merdeka (Parkir Liar)",
+			"Maju dikit, Pak, maju dikit! Parkir sini aja, aman!",
+			"Aktif (Macet)",
+			Color(1.0, 0.6, 0.1),
+			[
+				{
+					"title": "Buka Opsi Penataan Pak Slamet",
+					"action": func():
+						townhall_modal.visible = false
+						open_pak_slamet_dialog()
+				}
+			]
+		)
+		th_complaints_container.add_child(card)
+
+	# 2. Kartu Pengaduan Warga Aktif
+	for comp in data.active_complaints:
+		has_items = true
+		var comp_id: String = comp.get("id", "")
+		var comp_type: String = comp.get("type", "")
+		var citizen_name: String = comp.get("citizen_name", "Warga")
+		var loc: String = comp.get("location", "Area Kota")
+		var quote: String = comp.get("quote", "")
+		var is_late: bool = (comp.get("status") == "late")
+
+		var status_text := "Terlambat (Pop -5)" if is_late else "Aktif"
+		var status_color := Color(1.0, 0.3, 0.3) if is_late else Color(0.3, 0.9, 0.4)
+
+		var solutions: Array = ComplaintsData.COMPLAINT_SOLUTIONS.get(comp_type, [])
+		var actions: Array = []
+
+		for s_idx in range(solutions.size()):
+			var sol: Dictionary = solutions[s_idx]
+			var opt_title: String = "%s (Rp %s)" % [sol.get("title", ""), _format_number(sol.get("cost", 0))]
+			var opt_idx := s_idx
+			actions.append({
+				"title": opt_title,
+				"action": func():
+					if city_manager:
+						city_manager.resolve_complaint(comp_id, opt_idx)
+			})
+
+		var card := _create_complaint_card(citizen_name, loc, quote, status_text, status_color, actions)
+		th_complaints_container.add_child(card)
+
+	if not has_items:
+		var empty_lbl := Label.new()
+		empty_lbl.text = "Tidak ada pengaduan aktif saat ini. Kota tertib dan warga merasa puas!"
+		empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_lbl.modulate = Color(0.8, 0.9, 0.8)
+		th_complaints_container.add_child(empty_lbl)
+
+func _create_complaint_card(citizen: String, loc: String, quote: String, status_text: String, status_color: Color, actions: Array) -> PanelContainer:
+	var card := PanelContainer.new()
+	var sbox := StyleBoxFlat.new()
+	sbox.bg_color = Color(0.14, 0.16, 0.22, 0.92)
+	sbox.corner_radius_top_left = 6
+	sbox.corner_radius_top_right = 6
+	sbox.corner_radius_bottom_right = 6
+	sbox.corner_radius_bottom_left = 6
+	sbox.content_margin_left = 10.0
+	sbox.content_margin_top = 8.0
+	sbox.content_margin_right = 10.0
+	sbox.content_margin_bottom = 8.0
+	card.add_theme_stylebox_override("panel", sbox)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+
+	# Header: Nama Warga + Status
+	var hbox_header := HBoxContainer.new()
+	var lbl_name := Label.new()
+	lbl_name.text = citizen + " — " + loc
+	lbl_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl_name.add_theme_font_size_override("font_size", 14)
+	lbl_name.modulate = Color(1.0, 0.9, 0.4)
+	hbox_header.add_child(lbl_name)
+
+	var lbl_status := Label.new()
+	lbl_status.text = status_text
+	lbl_status.modulate = status_color
+	lbl_status.add_theme_font_size_override("font_size", 12)
+	hbox_header.add_child(lbl_status)
+	vbox.add_child(hbox_header)
+
+	# Kutipan Keluhan
+	var lbl_quote := Label.new()
+	lbl_quote.text = "\"" + quote + "\""
+	lbl_quote.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_quote.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(lbl_quote)
+
+	# Tombol Tindakan
+	if not actions.is_empty():
+		var hbox_btns := HBoxContainer.new()
+		hbox_btns.add_theme_constant_override("separation", 8)
+		for act in actions:
+			var btn := Button.new()
+			btn.text = act.get("title", "Tanggapi")
+			btn.custom_minimum_size = Vector2(0, 30)
+			btn.pressed.connect(act.get("action"))
+			hbox_btns.add_child(btn)
+		vbox.add_child(hbox_btns)
+
+	card.add_child(vbox)
+	return card
 
 func _show_toast(msg: String) -> void:
 	toast_label.text = msg
 	toast_label.visible = true
-	toast_timer.start(2.5)
+	toast_timer.start(3.0)
 
 func _format_number(val: int) -> String:
 	var s := str(val)

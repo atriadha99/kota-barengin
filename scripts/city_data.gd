@@ -16,7 +16,9 @@ enum TileType {
 	WATER_TOWER,
 	PARK,
 	FARM,
-	BUILDING
+	BUILDING,
+	OFFICIAL_PARKING,
+	TOWNHALL
 }
 
 enum BuildingZone {
@@ -35,6 +37,11 @@ const COST_POWER_PLANT: int = 50000
 const COST_WATER_TOWER: int = 30000
 const COST_PARK: int = 10000
 const COST_FARM: int = 15000
+
+# Kebijakan Pak Slamet & Parkir (Langkah 5)
+const COST_PAK_SLAMET_EXPEL: int = 50000
+const COST_OFFICIAL_PARKING_TILE: int = 150000
+const REVENUE_OFFICIAL_PARKING_MONTHLY: int = 5000
 
 # Panen & Pertanian (Langkah 4)
 const WHEAT_PER_HARVEST: int = 10
@@ -67,8 +74,28 @@ var year: int = 1
 # Ekonomi & Pajak (Langkah 3)
 var tax_rate: float = 0.08 # 8% default (5% - 13%)
 var happiness: float = 70.0 # 0 - 100 (mulai 70)
+var popularity: float = 70.0 # 0 - 100 (mulai 70, terpisah dari kebahagiaan)
 var city_level: String = "Desa"
 var game_speed: float = 1.0 # 0.0 (Pause), 1.0 (1x), 3.0 (3x)
+
+# Status Pak Slamet (Langkah 5)
+# state: "idle" | "active" | "official"
+var pak_slamet_status: Dictionary = {
+	"state": "idle",
+	"active_tile": Vector2i(-1, -1),
+	"street_name": "Jl. Merdeka",
+	"months_active": 0,
+	"months_ignored": 0,
+	"cooldown_months": 2, # pertama muncul di Bulan 3 game
+	"has_official_parking": false,
+	"official_parking_tiles": []
+}
+
+# Daftar pengaduan aktif warga
+var active_complaints: Array = []
+
+# Data profil warga tetap (Persistent Citizens)
+var citizens_data: Array = []
 
 var power_supply: int = 0
 var power_used: int = 0
@@ -89,6 +116,83 @@ var tiles: Array = []
 
 func _init() -> void:
 	reset_grid()
+	init_citizens_data()
+
+func init_citizens_data() -> void:
+	citizens_data = [
+		{
+			"id": "dimas",
+			"name": "Mas Dimas",
+			"age": 21,
+			"occupation": "Mahasiswa",
+			"address": "Jl. Merdeka No. 12",
+			"traits": "Santai, hobi ngopi",
+			"history": ["Kemarin ketabrak becak di Jl. Merdeka, kakinya keseleo, sekarang kuliahnya naik ojek."]
+		},
+		{
+			"id": "sari",
+			"name": "Mbak Sari",
+			"age": 28,
+			"occupation": "Kasir Minimarket",
+			"address": "Jl. Sudirman No. 4B",
+			"traits": "Ramah tapi gampang gemas",
+			"history": ["Baru kredit motor matic bulan lalu, tiap pagi lewat persimpangan macet."]
+		},
+		{
+			"id": "budi",
+			"name": "Pak Budi",
+			"age": 45,
+			"occupation": "Guru SD",
+			"address": "Jl. Melati No. 8",
+			"traits": "Penyabar dan gemar berkebun",
+			"history": ["Suka menyiram tanaman di pekarangan, paling kesal kalau tong sampah depan rumah telat diangkut."]
+		},
+		{
+			"id": "rina",
+			"name": "Bu Rina",
+			"age": 40,
+			"occupation": "Pemilik Warung Nasi",
+			"address": "Jl. Merdeka No. 3",
+			"traits": "Pekerja keras dan supel",
+			"history": ["Warungnya selalu penuh saat jam makan siang karyawan dan sopir."]
+		},
+		{
+			"id": "joko",
+			"name": "Kang Joko",
+			"age": 35,
+			"occupation": "Kurir Paket",
+			"address": "Jl. Kartini No. 17",
+			"traits": "Cekatan dan hafal jalan tikus",
+			"history": ["Sehari keliling antar 80 paket, hafal persimpangan mana yang lampu merahnya lama."]
+		},
+		{
+			"id": "dewi",
+			"name": "Teh Dewi",
+			"age": 30,
+			"occupation": "Bidan Puskesmas",
+			"address": "Jl. Melati No. 2",
+			"traits": "Penyayang dan tenang",
+			"history": ["Sering jalan kaki ke klinik, senang kalau lingkungan sekitarnya teduh dan banyak pohon."]
+		},
+		{
+			"id": "agus",
+			"name": "Bang Agus",
+			"age": 38,
+			"occupation": "Montir Bengkel",
+			"address": "Jl. Sudirman No. 19",
+			"traits": "Humoris dan to the point",
+			"history": ["Sering ngobrol akrab sambil menambal ban motor warga yang bocor."]
+		},
+		{
+			"id": "lestari",
+			"name": "Mbak Lestari",
+			"age": 26,
+			"occupation": "Admin Perkantoran",
+			"address": "Jl. Kartini No. 5",
+			"traits": "Tertib dan rapi",
+			"history": ["Tiap pagi berangkat kerja selalu bawa bekal, sensitif dengan debu dan bau sampah."]
+		}
+	]
 
 func reset_grid() -> void:
 	tiles.clear()

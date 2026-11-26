@@ -14,6 +14,7 @@ class SimpleCar:
 
 var cars: Array = []
 var city_data: CityData
+var speed_multiplier: float = 1.0
 
 func setup(p_city_data: CityData) -> void:
 	city_data = p_city_data
@@ -97,7 +98,7 @@ func _process(delta: float) -> void:
 			car.active = true
 			car.node.visible = true
 
-		car.progress += car.speed * delta
+		car.progress += car.speed * speed_multiplier * delta
 		if car.progress >= 1.0:
 			car.progress = 0.0
 			var prev_tile := car.current_tile

@@ -5,6 +5,9 @@ extends Node3D
 
 signal city_updated(city_data: CityData)
 signal show_toast(message: String)
+signal open_pak_slamet_modal()
+signal open_citizen_modal(citizen_info: Dictionary, complaint_info: Dictionary)
+signal open_townhall_modal()
 
 enum ToolMode {
 	ROAD,
@@ -24,6 +27,8 @@ var tile_visuals: Dictionary = {} # Vector2i -> Node3D
 
 @onready var tiles_root: Node3D = $TilesRoot
 @onready var car_controller: CarController = $CarController
+@onready var pak_slamet_manager: PakSlametManager = $PakSlametManager
+@onready var citizen_manager: CitizenManager = $CitizenManager
 @export var camera_controller: CameraController
 
 # Siklus bulan permainan: 1 bulan = 60 detik di kecepatan 1x
@@ -36,9 +41,26 @@ func _ready() -> void:
 	if car_controller:
 		car_controller.setup(city_data)
 
+	if pak_slamet_manager:
+		pak_slamet_manager.setup(city_data, car_controller, self)
+		pak_slamet_manager.pak_slamet_event.connect(func(type: String, msg: String):
+			show_toast.emit(msg)
+			city_updated.emit(city_data)
+		)
+		pak_slamet_manager.open_pak_slamet_dialog.connect(func():
+			open_pak_slamet_modal.emit()
+		)
+
+	if citizen_manager:
+		citizen_manager.setup(city_data)
+		citizen_manager.citizen_selected.connect(func(c_info: Dictionary, comp_info: Dictionary):
+			open_citizen_modal.emit(c_info, comp_info)
+		)
+
 	if camera_controller:
 		camera_controller.tile_clicked.connect(_on_tile_clicked)
 
+	_ensure_townhall_exists()
 	city_data.update_utilities()
 	city_data.happiness = city_data.calculate_happiness()
 	city_data.city_level = CityData.get_city_tier(city_data.population)
@@ -65,6 +87,12 @@ func set_tax_rate(rate: float) -> void:
 	city_data.happiness = city_data.calculate_happiness()
 	city_updated.emit(city_data)
 
+func _ensure_townhall_exists() -> void:
+	# Tempatkan gedung Balai Kota di area tengah kota (tile 7, 7) jika belum ada
+	var th_pos := Vector2i(7, 7)
+	if city_data.get_tile(th_pos.x, th_pos.y).get("type", CityData.TileType.EMPTY) == CityData.TileType.EMPTY:
+		city_data.set_tile(th_pos.x, th_pos.y, CityData.TileType.TOWNHALL, 0)
+
 func _on_tile_clicked(screen_pos: Vector2) -> void:
 	if not camera_controller or not camera_controller.camera:
 		return
@@ -84,6 +112,23 @@ func _on_tile_clicked(screen_pos: Vector2) -> void:
 	var tile_coords := CityData.world_pos_to_tile(hit_pos)
 
 	if not city_data.is_valid_tile(tile_coords.x, tile_coords.y):
+		return
+
+	# 1. Cek apakah klik mengenai warga pejalan kaki (buka profil warga)
+	if citizen_manager and citizen_manager.check_click_hit(hit_pos):
+		return
+
+	# 2. Cek apakah klik mengenai Pak Slamet / lokasi parkir liar aktif
+	var ps_status: Dictionary = city_data.pak_slamet_status
+	if ps_status.get("state") == "active":
+		var ps_tile: Vector2i = ps_status.get("active_tile", Vector2i(-1, -1))
+		if tile_coords == ps_tile or tile_coords.distance_to(ps_tile) <= 1:
+			open_pak_slamet_modal.emit()
+			return
+
+	# 3. Cek apakah klik mengenai gedung Balai Kota
+	if city_data.get_tile(tile_coords.x, tile_coords.y).get("type", CityData.TileType.EMPTY) == CityData.TileType.TOWNHALL:
+		open_townhall_modal.emit()
 		return
 
 	_apply_tool(tile_coords.x, tile_coords.y)
@@ -335,6 +380,21 @@ func _advance_month() -> void:
 	# Ubah harga pasar gandum tiap bulan (Rp 800 - Rp 1.500)
 	city_data.wheat_price = randi_range(800, 1500)
 
+	# 6. Simulasi Siklus Pak Slamet & Pengaduan Warga (Langkah 5)
+	if pak_slamet_manager:
+		pak_slamet_manager.on_month_passed()
+
+	# Cek pengaduan yang terabaikan sampai akhir bulan (penurunan Popularitas -5)
+	for complaint in city_data.active_complaints:
+		if complaint.get("status") == "active":
+			complaint["status"] = "late"
+			city_data.popularity = clampf(city_data.popularity - 5.0, 0.0, 100.0)
+		elif complaint.get("status") == "late":
+			city_data.popularity = clampf(city_data.popularity - 5.0, 0.0, 100.0)
+
+	if citizen_manager:
+		citizen_manager.update_citizen_complaints()
+
 	# Update ulang utilitas dan tampilan visual semua tile (supaya ikon peringatan muncul/hilang tepat)
 	city_data.update_utilities()
 	city_data.happiness = city_data.calculate_happiness()
@@ -426,3 +486,43 @@ func _format_number(val: int) -> String:
 		if count % 3 == 0 and i > 0:
 			result = "." + result
 	return result
+
+## Penyelesaian Pengaduan Warga dari Balai Kota
+func resolve_complaint(complaint_id: String, option_idx: int) -> void:
+	var target_index := -1
+	var target_complaint: Dictionary = {}
+
+	for idx in range(city_data.active_complaints.size()):
+		var c: Dictionary = city_data.active_complaints[idx]
+		if c.get("id") == complaint_id:
+			target_complaint = c
+			target_index = idx
+			break
+
+	if target_complaint.is_empty():
+		return
+
+	var c_type: String = target_complaint.get("type", "")
+	var solutions: Array = ComplaintsData.COMPLAINT_SOLUTIONS.get(c_type, [])
+	if option_idx >= solutions.size():
+		return
+
+	var chosen: Dictionary = solutions[option_idx]
+	var cost: int = chosen.get("cost", 0)
+	var pop_gain: int = chosen.get("pop_gain", 0)
+
+	if city_data.money < cost:
+		show_toast.emit("Uang tidak cukup! (Kurang Rp %s)" % _format_number(cost - city_data.money))
+		return
+
+	city_data.money -= cost
+	city_data.popularity = clampf(city_data.popularity + float(pop_gain), 0.0, 100.0)
+	city_data.happiness = clampf(city_data.happiness + (2.0 if pop_gain > 0 else -1.0), 0.0, 100.0)
+
+	city_data.active_complaints.remove_at(target_index)
+	if citizen_manager:
+		citizen_manager.resolve_complaint(c_type)
+
+	var label_action: String = "positif (+%d)" % pop_gain if pop_gain >= 0 else "negatif (%d)" % pop_gain
+	show_toast.emit("Pengaduan diselesaikan! Dampak Popularitas %s" % label_action)
+	city_updated.emit(city_data)

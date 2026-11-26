@@ -3,7 +3,7 @@ extends RefCounted
 
 ## Generator visual 3D prosedural untuk tile, zona, dan bangunan low-poly (Godot 4.7)
 
-static func create_tile_node(type: CityData.TileType, level: int = 0, zone: CityData.BuildingZone = CityData.BuildingZone.RESIDENTIAL) -> Node3D:
+static func create_tile_node(type: CityData.TileType, level: int = 0, zone: CityData.BuildingZone = CityData.BuildingZone.RESIDENTIAL, has_util: bool = true) -> Node3D:
 	var root := Node3D.new()
 
 	match type:
@@ -40,6 +40,24 @@ static func create_tile_node(type: CityData.TileType, level: int = 0, zone: City
 			root.add_child(_create_park_mesh())
 		CityData.TileType.FARM:
 			root.add_child(_create_farm_mesh(level))
+		CityData.TileType.OFFICIAL_PARKING:
+			root.add_child(_create_official_parking_mesh())
+		CityData.TileType.TOWNHALL:
+			root.add_child(_create_townhall_mesh())
+
+	# Indikator jika bangunan tidak mendapat suplai utilitas (listrik / air)
+	if not has_util and (type == CityData.TileType.BUILDING or (level > 0 and type in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I])):
+		var badge := Label3D.new()
+		badge.text = "⚠️"
+		badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		badge.font_size = 28
+		badge.modulate = Color(1.0, 0.3, 0.3)
+		badge.outline_render_priority = 1
+		badge.outline_size = 4
+		badge.outline_modulate = Color(0.1, 0.1, 0.1)
+		badge.no_depth_test = true
+		badge.position = Vector3(0.0, 0.8 + float(level) * 0.7, 0.0)
+		root.add_child(badge)
 
 	return root
 
@@ -498,3 +516,352 @@ static func create_harvest_popup(amount: int) -> Label3D:
 	label.no_depth_test = true
 	label.position = Vector3(0.0, 1.6, 0.0)
 	return label
+
+## --- LAHAN PARKIR RESMI (Solusi Kebijakan Pak Slamet) ---
+static func _create_official_parking_mesh() -> Node3D:
+	var node := Node3D.new()
+	# Aspal abu-abu rapi
+	var ground := MeshInstance3D.new()
+	var g_box := BoxMesh.new()
+	g_box.size = Vector3(1.95, 0.03, 1.95)
+	var g_mat := StandardMaterial3D.new()
+	g_mat.albedo_color = Color(0.24, 0.24, 0.26)
+	ground.mesh = g_box
+	ground.position = Vector3(0.0, 0.015, 0.0)
+	node.add_child(ground)
+
+	# Marka garis parkir putih rapi
+	var line_mat := StandardMaterial3D.new()
+	line_mat.albedo_color = Color(0.95, 0.95, 0.95)
+	for px in [-0.65, 0.0, 0.65]:
+		var line := MeshInstance3D.new()
+		var l_box := BoxMesh.new()
+		l_box.size = Vector3(0.06, 0.035, 1.4)
+		line.mesh = l_box
+		line.material_override = line_mat
+		line.position = Vector3(px, 0.02, 0.0)
+		node.add_child(line)
+
+	# Plang Rambu Parkir Resmi "P"
+	var sign_pole := MeshInstance3D.new()
+	var sp_box := BoxMesh.new()
+	sp_box.size = Vector3(0.06, 0.9, 0.06)
+	sign_pole.mesh = sp_box
+	sign_pole.position = Vector3(0.8, 0.45, -0.8)
+	node.add_child(sign_pole)
+
+	var sign_board := MeshInstance3D.new()
+	var sb_box := BoxMesh.new()
+	sb_box.size = Vector3(0.25, 0.25, 0.04)
+	var sb_mat := StandardMaterial3D.new()
+	sb_mat.albedo_color = Color(0.15, 0.45, 0.85) # Biru khas rambu P
+	sign_board.mesh = sb_box
+	sign_board.material_override = sb_mat
+	sign_board.position = Vector3(0.8, 0.9, -0.8)
+	node.add_child(sign_board)
+
+	# 1 Mobil terparkir rapi
+	var parked_car := MeshInstance3D.new()
+	var pc_box := BoxMesh.new()
+	pc_box.size = Vector3(0.42, 0.22, 0.75)
+	var pc_mat := StandardMaterial3D.new()
+	pc_mat.albedo_color = Color(0.85, 0.85, 0.85)
+	parked_car.mesh = pc_box
+	parked_car.material_override = pc_mat
+	parked_car.position = Vector3(-0.32, 0.12, 0.0)
+	node.add_child(parked_car)
+
+	return node
+
+## --- GEDUNG BALAI KOTA (Landmark Pusat Pemerintahan) ---
+static func _create_townhall_mesh() -> Node3D:
+	var node := Node3D.new()
+
+	# Alas batu marmer / plinth
+	var base := MeshInstance3D.new()
+	var base_box := BoxMesh.new()
+	base_box.size = Vector3(1.85, 0.15, 1.85)
+	var base_mat := StandardMaterial3D.new()
+	base_mat.albedo_color = Color(0.80, 0.80, 0.78)
+	base.mesh = base_box
+	base.position = Vector3(0.0, 0.075, 0.0)
+	node.add_child(base)
+
+	# Gedung utama
+	var body := MeshInstance3D.new()
+	var body_box := BoxMesh.new()
+	body_box.size = Vector3(1.5, 1.3, 1.4)
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = Color(0.92, 0.91, 0.86) # Krem putih megah
+	body.mesh = body_box
+	body.position = Vector3(0.0, 0.8, 0.0)
+	node.add_child(body)
+
+	# Pilar pilar teras depan
+	var col_mat := StandardMaterial3D.new()
+	col_mat.albedo_color = Color(0.98, 0.98, 0.96)
+	for cx in [-0.55, -0.2, 0.2, 0.55]:
+		var col := MeshInstance3D.new()
+		var col_box := BoxMesh.new()
+		col_box.size = Vector3(0.10, 1.1, 0.10)
+		col.mesh = col_box
+		col.material_override = col_mat
+		col.position = Vector3(cx, 0.7, 0.72)
+		node.add_child(col)
+
+	# Atap pelana segitiga klasik
+	var roof := MeshInstance3D.new()
+	var roof_prism := PrismMesh.new()
+	roof_prism.size = Vector3(1.6, 0.55, 1.5)
+	var roof_mat := StandardMaterial3D.new()
+	roof_mat.albedo_color = Color(0.65, 0.25, 0.22) # Merah marun genteng
+	roof.mesh = roof_prism
+	roof.position = Vector3(0.0, 1.72, 0.0)
+	node.add_child(roof)
+
+	# Kubah kecil / menara jam di atas
+	var cupola := MeshInstance3D.new()
+	var cupola_box := BoxMesh.new()
+	cupola_box.size = Vector3(0.35, 0.45, 0.35)
+	cupola.mesh = cupola_box
+	cupola.position = Vector3(0.0, 2.2, 0.0)
+	node.add_child(cupola)
+
+	# Tiang bendera merah putih mini
+	var pole := MeshInstance3D.new()
+	var pole_box := BoxMesh.new()
+	pole_box.size = Vector3(0.04, 0.5, 0.04)
+	pole.mesh = pole_box
+	pole.position = Vector3(0.0, 2.65, 0.0)
+	node.add_child(pole)
+
+	var flag_red := MeshInstance3D.new()
+	var fr_box := BoxMesh.new()
+	fr_box.size = Vector3(0.18, 0.08, 0.02)
+	var fr_mat := StandardMaterial3D.new()
+	fr_mat.albedo_color = Color(0.9, 0.1, 0.1)
+	flag_red.mesh = fr_box
+	flag_red.material_override = fr_mat
+	flag_red.position = Vector3(0.1, 2.85, 0.0)
+	node.add_child(flag_red)
+
+	var flag_white := MeshInstance3D.new()
+	var fw_box := BoxMesh.new()
+	fw_box.size = Vector3(0.18, 0.08, 0.02)
+	var fw_mat := StandardMaterial3D.new()
+	fw_mat.albedo_color = Color(0.95, 0.95, 0.95)
+	flag_white.mesh = fw_box
+	flag_white.material_override = fw_mat
+	flag_white.position = Vector3(0.1, 2.77, 0.0)
+	node.add_child(flag_white)
+
+	return node
+
+## --- KARAKTER PAK SLAMET (Rompi Oranye Pudar, Topi Lusuh, Peluit) ---
+static func create_pak_slamet_node() -> Node3D:
+	var node := Node3D.new()
+	node.name = "PakSlamet"
+
+	# Kaki celana gelap
+	var leg_mat := StandardMaterial3D.new()
+	leg_mat.albedo_color = Color(0.25, 0.28, 0.35)
+	for lx in [-0.07, 0.07]:
+		var leg := MeshInstance3D.new()
+		var leg_box := BoxMesh.new()
+		leg_box.size = Vector3(0.09, 0.35, 0.10)
+		leg.mesh = leg_box
+		leg.material_override = leg_mat
+		leg.position = Vector3(lx, 0.175, 0.0)
+		node.add_child(leg)
+
+	# Badan: Rompi oranye pudar khas tukang parkir
+	var body := MeshInstance3D.new()
+	var body_box := BoxMesh.new()
+	body_box.size = Vector3(0.28, 0.38, 0.20)
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = Color(0.92, 0.45, 0.15) # Rompi oranye pudar
+	body.mesh = body_box
+	body.material_override = body_mat
+	body.position = Vector3(0.0, 0.54, 0.0)
+	node.add_child(body)
+
+	# Peluit perak di dada
+	var whistle := MeshInstance3D.new()
+	var whistle_box := BoxMesh.new()
+	whistle_box.size = Vector3(0.06, 0.08, 0.04)
+	var whistle_mat := StandardMaterial3D.new()
+	whistle_mat.albedo_color = Color(0.85, 0.88, 0.92) # Perak
+	whistle.mesh = whistle_box
+	whistle.material_override = whistle_mat
+	whistle.position = Vector3(0.0, 0.62, 0.11)
+	node.add_child(whistle)
+
+	# Kepala
+	var head := MeshInstance3D.new()
+	var head_box := BoxMesh.new()
+	head_box.size = Vector3(0.20, 0.20, 0.20)
+	var head_mat := StandardMaterial3D.new()
+	head_mat.albedo_color = Color(0.85, 0.68, 0.52) # Kulit hangat
+	head.mesh = head_box
+	head.material_override = head_mat
+	head.position = Vector3(0.0, 0.82, 0.0)
+	node.add_child(head)
+
+	# Topi lusuh (dull cap) dengan pet lidah topi
+	var cap := MeshInstance3D.new()
+	var cap_box := BoxMesh.new()
+	cap_box.size = Vector3(0.25, 0.08, 0.25)
+	var cap_mat := StandardMaterial3D.new()
+	cap_mat.albedo_color = Color(0.42, 0.36, 0.30) # Cokelat kusam / lusuh
+	cap.mesh = cap_box
+	cap.material_override = cap_mat
+	cap.position = Vector3(0.0, 0.94, 0.0)
+	node.add_child(cap)
+
+	var visor := MeshInstance3D.new()
+	var visor_box := BoxMesh.new()
+	visor_box.size = Vector3(0.22, 0.03, 0.12)
+	visor.mesh = visor_box
+	visor.material_override = cap_mat
+	visor.position = Vector3(0.0, 0.92, 0.16)
+	node.add_child(visor)
+
+	# Lengan mengarahkan parkir
+	var arm_r := MeshInstance3D.new()
+	var arm_box := BoxMesh.new()
+	arm_box.size = Vector3(0.08, 0.32, 0.08)
+	arm_r.mesh = arm_box
+	arm_r.material_override = body_mat
+	arm_r.rotation_degrees = Vector3(45, 0, -25)
+	arm_r.position = Vector3(0.20, 0.58, 0.12)
+	node.add_child(arm_r)
+
+	return node
+
+## --- MOBIL PARKIR LIAR SEMBARANGAN (Akibat Pak Slamet) ---
+static func create_illegal_parking_mesh() -> Node3D:
+	var node := Node3D.new()
+	node.name = "IllegalParking"
+
+	var car_colors = [
+		Color(0.85, 0.2, 0.2), # Merah
+		Color(0.25, 0.25, 0.28), # Abu gelap
+		Color(0.85, 0.85, 0.88), # Putih
+		Color(0.2, 0.45, 0.75) # Biru
+	]
+
+	# 3 Mobil parkir serong miring memakan badan jalan
+	var positions = [
+		Vector3(-0.62, 0.06, -0.45),
+		Vector3(-0.58, 0.06, 0.40),
+		Vector3(0.65, 0.06, 0.05)
+	]
+	var rotations = [28.0, -32.0, 18.0]
+
+	for i in range(3):
+		var car := Node3D.new()
+		var body := MeshInstance3D.new()
+		var b_box := BoxMesh.new()
+		b_box.size = Vector3(0.38, 0.18, 0.65)
+		var b_mat := StandardMaterial3D.new()
+		b_mat.albedo_color = car_colors[i % car_colors.size()]
+		body.mesh = b_box
+		body.material_override = b_mat
+		body.position = Vector3(0.0, 0.10, 0.0)
+		car.add_child(body)
+
+		var roof := MeshInstance3D.new()
+		var r_box := BoxMesh.new()
+		r_box.size = Vector3(0.32, 0.14, 0.35)
+		roof.mesh = r_box
+		roof.position = Vector3(0.0, 0.24, -0.05)
+		car.add_child(roof)
+
+		car.position = positions[i]
+		car.rotation_degrees.y = rotations[i]
+		node.add_child(car)
+
+	return node
+
+## --- NPC WARGA PEJALAN KAKI SEDERHANA ---
+static func create_citizen_node(color_seed: int = 0) -> Node3D:
+	var node := Node3D.new()
+
+	var shirt_colors = [
+		Color(0.25, 0.55, 0.85), # Biru
+		Color(0.85, 0.30, 0.35), # Merah muda
+		Color(0.35, 0.75, 0.40), # Hijau
+		Color(0.92, 0.75, 0.25), # Kuning
+		Color(0.65, 0.40, 0.80), # Ungu
+		Color(0.92, 0.55, 0.25)  # Oranye
+	]
+	var shirt_color: Color = shirt_colors[color_seed % shirt_colors.size()]
+
+	# Kaki
+	var leg_mat := StandardMaterial3D.new()
+	leg_mat.albedo_color = Color(0.20, 0.22, 0.28)
+	for lx in [-0.06, 0.06]:
+		var leg := MeshInstance3D.new()
+		var leg_box := BoxMesh.new()
+		leg_box.size = Vector3(0.08, 0.32, 0.08)
+		leg.mesh = leg_box
+		leg.material_override = leg_mat
+		leg.position = Vector3(lx, 0.16, 0.0)
+		node.add_child(leg)
+
+	# Baju / Badan
+	var body := MeshInstance3D.new()
+	var body_box := BoxMesh.new()
+	body_box.size = Vector3(0.24, 0.34, 0.16)
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = shirt_color
+	body.mesh = body_box
+	body.material_override = body_mat
+	body.position = Vector3(0.0, 0.48, 0.0)
+	node.add_child(body)
+
+	# Kepala
+	var head := MeshInstance3D.new()
+	var head_box := BoxMesh.new()
+	head_box.size = Vector3(0.18, 0.18, 0.18)
+	var head_mat := StandardMaterial3D.new()
+	head_mat.albedo_color = Color(0.88, 0.72, 0.58)
+	head.mesh = head_box
+	head.material_override = head_mat
+	head.position = Vector3(0.0, 0.74, 0.0)
+	node.add_child(head)
+
+	# Rambut
+	var hair := MeshInstance3D.new()
+	var hair_box := BoxMesh.new()
+	hair_box.size = Vector3(0.20, 0.08, 0.20)
+	var hair_mat := StandardMaterial3D.new()
+	hair_mat.albedo_color = Color(0.18, 0.15, 0.12)
+	hair.mesh = hair_box
+	hair.material_override = hair_mat
+	hair.position = Vector3(0.0, 0.85, -0.01)
+	node.add_child(hair)
+
+	return node
+
+## --- BUBBLE CHAT ALA SIMCITY (Billboard 3D) ---
+static func create_bubble_chat(text: String, is_pak_slamet: bool = false) -> Node3D:
+	var root := Node3D.new()
+
+	var label := Label3D.new()
+	label.text = text
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.font_size = 22
+	label.outline_render_priority = 1
+	label.outline_size = 4
+	label.outline_modulate = Color(0.05, 0.05, 0.05, 0.95)
+	label.no_depth_test = true
+
+	if is_pak_slamet:
+		label.modulate = Color(1.0, 0.82, 0.25)
+	else:
+		label.modulate = Color(0.98, 0.98, 0.98)
+
+	label.position = Vector3(0.0, 1.35, 0.0)
+	root.add_child(label)
+	return root

@@ -6,9 +6,9 @@
 bg_color = Color(0.10, 0.12, 0.16, 0.88)
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
-content_margin_left = 14.0
+content_margin_left = 12.0
 content_margin_top = 8.0
-content_margin_right = 14.0
+content_margin_right = 12.0
 content_margin_bottom = 8.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_box"]
@@ -21,6 +21,22 @@ content_margin_left = 10.0
 content_margin_top = 8.0
 content_margin_right = 10.0
 content_margin_bottom = 8.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_modal"]
+bg_color = Color(0.12, 0.14, 0.20, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.28, 0.35, 0.50, 0.9)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+content_margin_left = 18.0
+content_margin_top = 16.0
+content_margin_right = 18.0
+content_margin_bottom = 16.0
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_toast"]
 bg_color = Color(0.85, 0.18, 0.18, 0.95)
@@ -46,19 +62,19 @@ script = ExtResource("1_hud")
 [node name="TopPanel" type="PanelContainer" parent="."]
 anchors_preset = 10
 anchor_right = 1.0
-offset_left = 12.0
-offset_right = -12.0
+offset_left = 10.0
+offset_right = -10.0
 offset_bottom = 44.0
 grow_horizontal = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_top")
 
 [node name="HBox" type="HBoxContainer" parent="TopPanel"]
 layout_mode = 2
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 
 [node name="LabelMoney" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "Rp 150.000"
 
 [node name="VSep1" type="VSeparator" parent="TopPanel/HBox"]
@@ -66,7 +82,7 @@ layout_mode = 2
 
 [node name="LabelPop" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "Pop: 0"
 
 [node name="VSep2" type="VSeparator" parent="TopPanel/HBox"]
@@ -74,47 +90,65 @@ layout_mode = 2
 
 [node name="LabelHappiness" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "Senang: 70%"
 
 [node name="VSep3" type="VSeparator" parent="TopPanel/HBox"]
 layout_mode = 2
 
-[node name="LabelPower" type="Label" parent="TopPanel/HBox"]
+[node name="LabelPopularity" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.85, 0.95, 1)
 theme_override_font_sizes/font_size = 15
-text = "Listrik: 0/0"
+text = "Populer: 70%"
 
 [node name="VSep4" type="VSeparator" parent="TopPanel/HBox"]
 layout_mode = 2
 
-[node name="LabelWater" type="Label" parent="TopPanel/HBox"]
+[node name="LabelPower" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
-text = "Air: 0/0"
+theme_override_font_sizes/font_size = 14
+text = "Listrik: 0/0"
 
 [node name="VSep5" type="VSeparator" parent="TopPanel/HBox"]
 layout_mode = 2
 
-[node name="LabelDate" type="Label" parent="TopPanel/HBox"]
+[node name="LabelWater" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
-text = "Bulan 1, Tahun 1"
+theme_override_font_sizes/font_size = 14
+text = "Air: 0/0"
 
 [node name="VSep6" type="VSeparator" parent="TopPanel/HBox"]
+layout_mode = 2
+
+[node name="LabelDate" type="Label" parent="TopPanel/HBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Bulan 1, Th 1"
+
+[node name="VSep7" type="VSeparator" parent="TopPanel/HBox"]
 layout_mode = 2
 
 [node name="LabelTier" type="Label" parent="TopPanel/HBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 15
 text = "[Desa]"
 
+[node name="VSep8" type="VSeparator" parent="TopPanel/HBox"]
+layout_mode = 2
+
+[node name="BtnTownHall" type="Button" parent="TopPanel/HBox"]
+custom_minimum_size = Vector2(110, 28)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "🏛 Balai Kota"
+
 [node name="TimeSpeedPanel" type="PanelContainer" parent="."]
-offset_left = 12.0
-offset_top = 52.0
-offset_right = 168.0
-offset_bottom = 96.0
+offset_left = 10.0
+offset_top = 50.0
+offset_right = 166.0
+offset_bottom = 94.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_box")
 
 [node name="HBoxSpeed" type="HBoxContainer" parent="TimeSpeedPanel"]
@@ -137,10 +171,10 @@ layout_mode = 2
 text = "3x"
 
 [node name="TaxPanel" type="PanelContainer" parent="."]
-offset_left = 12.0
-offset_top = 104.0
-offset_right = 168.0
-offset_bottom = 166.0
+offset_left = 10.0
+offset_top = 100.0
+offset_right = 166.0
+offset_bottom = 162.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_box")
 
 [node name="VBoxTax" type="VBoxContainer" parent="TaxPanel"]
@@ -160,10 +194,10 @@ step = 1.0
 value = 8.0
 
 [node name="FarmPanel" type="PanelContainer" parent="."]
-offset_left = 12.0
-offset_top = 174.0
-offset_right = 178.0
-offset_bottom = 276.0
+offset_left = 10.0
+offset_top = 168.0
+offset_right = 176.0
+offset_bottom = 270.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_box")
 
 [node name="VBoxFarm" type="VBoxContainer" parent="FarmPanel"]
@@ -197,9 +231,9 @@ anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -190.0
-offset_top = 52.0
-offset_right = -12.0
-offset_bottom = 156.0
+offset_top = 50.0
+offset_right = -10.0
+offset_bottom = 154.0
 grow_horizontal = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_box")
 
@@ -237,13 +271,13 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -260.0
-offset_top = -26.0
-offset_right = 260.0
-offset_bottom = 26.0
+offset_left = -280.0
+offset_top = -28.0
+offset_right = 280.0
+offset_bottom = 28.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_font_sizes/font_size = 19
+theme_override_font_sizes/font_size = 18
 theme_override_styles/normal = SubResource("StyleBoxFlat_toast")
 text = "Pesan Sistem"
 horizontal_alignment = 1
@@ -315,3 +349,202 @@ text = "Farm\nRp 15.000"
 custom_minimum_size = Vector2(88, 44)
 layout_mode = 2
 text = "Bulldozer\nGratis"
+
+# --- MODAL PAK SLAMET (Langkah 5) ---
+[node name="PakSlametModal" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -170.0
+offset_right = 260.0
+offset_bottom = 170.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
+
+[node name="VBox" type="VBoxContainer" parent="PakSlametModal"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="PakSlametModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.75, 0.2, 1)
+theme_override_font_sizes/font_size = 17
+text = "Laporan Lapangan: Parkir Liar Pak Slamet"
+horizontal_alignment = 1
+
+[node name="Dialogue" type="Label" parent="PakSlametModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "\"Pak Slamet: Maju dikit, Pak, maju dikit! Parkir sini aja, aman!\""
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="Desc" type="Label" parent="PakSlametModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.85, 1)
+theme_override_font_sizes/font_size = 12
+text = "Pak Slamet sedang mengatur parkir liar di Jl. Merdeka. Mobil terparkir memakan badan jalan dan memperlambat arus lalu lintas (-50% kecepatan). Kebahagiaan warga sekitar menurun. Tentukan kebijakan Anda:"
+autowrap_mode = 2
+
+[node name="HBoxActions" type="HBoxContainer" parent="PakSlametModal/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="BtnExpel" type="Button" parent="PakSlametModal/VBox/HBoxActions"]
+custom_minimum_size = Vector2(150, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "1. Usir\n(Rp 50.000)"
+
+[node name="BtnOfficialParking" type="Button" parent="PakSlametModal/VBox/HBoxActions"]
+custom_minimum_size = Vector2(170, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "2. Bangun Parkir Resmi\n(Rp 300.000 / 2 Tile)"
+
+[node name="BtnIgnore" type="Button" parent="PakSlametModal/VBox/HBoxActions"]
+custom_minimum_size = Vector2(130, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "3. Biarin Aja\n(Gratis)"
+
+[node name="BtnClosePS" type="Button" parent="PakSlametModal/VBox"]
+custom_minimum_size = Vector2(100, 30)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 13
+text = "Tutup"
+
+# --- MODAL BALAI KOTA (Langkah 5) ---
+[node name="TownHallModal" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -220.0
+offset_right = 320.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
+
+[node name="VBox" type="VBoxContainer" parent="TownHallModal"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="TownHallModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+theme_override_font_sizes/font_size = 18
+text = "🏛 Balai Kota KotaBareng — Layanan Aspirasi Warga"
+horizontal_alignment = 1
+
+[node name="LabelStats" type="Label" parent="TownHallModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.85, 0.95, 1)
+theme_override_font_sizes/font_size = 13
+text = "Popularitas: 70%  |  Kebahagiaan: 70%  |  Kas: Rp 150.000"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="TownHallModal/VBox"]
+layout_mode = 2
+
+[node name="Scroll" type="ScrollContainer" parent="TownHallModal/VBox"]
+custom_minimum_size = Vector2(0, 260)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="VBoxComplaints" type="VBoxContainer" parent="TownHallModal/VBox/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="BtnCloseTH" type="Button" parent="TownHallModal/VBox"]
+custom_minimum_size = Vector2(120, 32)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 14
+text = "Tutup Balai Kota"
+
+# --- MODAL PROFIL WARGA (Langkah 5) ---
+[node name="CitizenProfileModal" type="PanelContainer" parent="."]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -230.0
+offset_top = -150.0
+offset_right = 230.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_modal")
+
+[node name="VBox" type="VBoxContainer" parent="CitizenProfileModal"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="LabelName" type="Label" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+theme_override_font_sizes/font_size = 17
+text = "Mas Dimas"
+horizontal_alignment = 1
+
+[node name="LabelJob" type="Label" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Pekerjaan: Mahasiswa"
+
+[node name="LabelAddress" type="Label" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Alamat: Jl. Merdeka No. 12"
+
+[node name="LabelTraits" type="Label" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Sifat: Santai, hobi ngopi"
+
+[node name="LabelHistory" type="Label" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.85, 0.9, 1)
+theme_override_font_sizes/font_size = 12
+text = "Catatan: \"Kemarin ketabrak becak di Jl. Merdeka, kakinya keseleo, sekarang kuliahnya naik ojek.\""
+autowrap_mode = 2
+
+[node name="LabelComplaint" type="Label" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.45, 0.4, 1)
+theme_override_font_sizes/font_size = 12
+text = "Keluhan: \"...\""
+autowrap_mode = 2
+
+[node name="HBoxCP" type="HBoxContainer" parent="CitizenProfileModal/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="BtnOpenTH" type="Button" parent="CitizenProfileModal/VBox/HBoxCP"]
+custom_minimum_size = Vector2(130, 32)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Buka Balai Kota"
+
+[node name="BtnCloseCP" type="Button" parent="CitizenProfileModal/VBox/HBoxCP"]
+custom_minimum_size = Vector2(90, 32)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Tutup"

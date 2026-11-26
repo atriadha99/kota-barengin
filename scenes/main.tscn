@@ -5,6 +5,8 @@
 [ext_resource type="Script" path="res://scripts/city_manager.gd" id="3_city"]
 [ext_resource type="Script" path="res://scripts/car_controller.gd" id="4_car"]
 [ext_resource type="PackedScene" uid="uid://b6r0wex4k1m8n" path="res://scenes/hud.tscn" id="5_hud"]
+[ext_resource type="Script" path="res://scripts/government/pak_slamet_manager.gd" id="6_ps"]
+[ext_resource type="Script" path="res://scripts/citizens/citizen_manager.gd" id="7_citizen"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
 sky_top_color = Color(0.35, 0.65, 0.95, 1)
@@ -109,6 +111,12 @@ camera_controller = NodePath("../CameraPivot")
 
 [node name="CarController" type="Node3D" parent="CityManager"]
 script = ExtResource("4_car")
+
+[node name="PakSlametManager" type="Node3D" parent="CityManager"]
+script = ExtResource("6_ps")
+
+[node name="CitizenManager" type="Node3D" parent="CityManager"]
+script = ExtResource("7_citizen")
 
 [node name="HUD" parent="." node_paths=PackedStringArray("city_manager") instance=ExtResource("5_hud")]
 city_manager = NodePath("../CityManager")
