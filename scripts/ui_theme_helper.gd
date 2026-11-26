@@ -48,9 +48,9 @@ static func make_chip_style() -> StyleBoxFlat:
 	sb.corner_radius_top_right = 8
 	sb.corner_radius_bottom_right = 8
 	sb.corner_radius_bottom_left = 8
-	sb.content_margin_left = 8.0
+	sb.content_margin_left = 6.0
 	sb.content_margin_top = 4.0
-	sb.content_margin_right = 10.0
+	sb.content_margin_right = 6.0
 	sb.content_margin_bottom = 4.0
 	return sb
 

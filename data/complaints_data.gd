@@ -23,6 +23,8 @@ const COMPLAINT_INFLATION: String = "harga_naik"
 const COMPLAINT_UNEMPLOYMENT: String = "pengangguran"
 const COMPLAINT_NO_TRANSIT: String = "tidak_ada_transportasi"
 const COMPLAINT_AIRPORT_NOISE: String = "kebisingan_bandara"
+const COMPLAINT_EVENT_BANJIR: String = "event_banjir"
+const COMPLAINT_EVENT_DEMO: String = "event_demo"
 
 # Variasi kalimat bubble chat untuk 3 keluhan utama
 const COMPLAINT_QUOTES = {
@@ -96,6 +98,12 @@ const COMPLAINT_QUOTES = {
 	],
 	COMPLAINT_AIRPORT_NOISE: [
 		"berisik, pesawat lewat terus dekat rumah warga!"
+	],
+	COMPLAINT_EVENT_BANJIR: [
+		"hujan deras bikin jalan tergenang banjir kecil, mobil susah lewat!"
+	],
+	COMPLAINT_EVENT_DEMO: [
+		"kami mau perubahan! warga berkumpul menyampaikan aspirasi di Balai Kota!"
 	]
 }
 
@@ -271,6 +279,14 @@ const COMPLAINT_SOLUTIONS = {
 	COMPLAINT_AIRPORT_NOISE: [
 		{ "title": "Pasang Peredam Suara Warga", "cost": 30000, "pop_gain": 3, "desc": "Redam kebisingan pesawat. Popularitas +3." },
 		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Kebisingan berlanjut. Popularitas -5." }
+	],
+	COMPLAINT_EVENT_BANJIR: [
+		{ "title": "Sedot Banjir & Bersihkan Drainase", "cost": 50000, "pop_gain": 5, "desc": "Banjir surut cepat. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Banjir surut alami 1 bulan. Popularitas -5." }
+	],
+	COMPLAINT_EVENT_DEMO: [
+		{ "title": "Dialog & Penuhi Aspirasi Warga", "cost": 30000, "pop_gain": 5, "desc": "Massa bubar tertib. Popularitas +5." },
+		{ "title": "Abaikan Aspirasi", "cost": 0, "pop_gain": -5, "desc": "Popularitas turun -5." }
 	]
 }
 

@@ -18,6 +18,7 @@ var airplanes: Array = []
 var city_data: CityData
 var speed_multiplier: float = 1.0
 var is_angkot_ngetem_active: bool = false
+var traffic_red_light: bool = false
 
 func setup(p_city_data: CityData) -> void:
 	city_data = p_city_data
@@ -102,7 +103,9 @@ func _process(delta: float) -> void:
 			car.active = true
 			car.node.visible = true
 
-		car.progress += car.speed * speed_multiplier * delta
+		var flood_slow := 0.5 if city_data.event_aktif.get("id", "") == "banjir" else 1.0
+		var light_mult := 0.0 if (traffic_red_light and _is_intersection_tile(car.current_tile)) else 1.0
+		car.progress += car.speed * speed_multiplier * flood_slow * light_mult * delta
 		if car.progress >= 1.0:
 			car.progress = 0.0
 			var prev_tile := car.current_tile
@@ -132,6 +135,13 @@ func _is_road(tile: Vector2i) -> bool:
 		return false
 	var tp: int = city_data.get_tile(tile.x, tile.y).get("type", CityData.TileType.EMPTY)
 	return tp in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS, CityData.TileType.FLYOVER]
+
+func _is_intersection_tile(tile: Vector2i) -> bool:
+	var adj := 0
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		if _is_road(tile + d):
+			adj += 1
+	return adj >= 3
 
 func _create_transit_models() -> void:
 	var specs := [

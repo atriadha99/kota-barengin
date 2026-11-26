@@ -9,6 +9,10 @@ signal open_pak_slamet_modal()
 signal open_citizen_modal(citizen_info: Dictionary, complaint_info: Dictionary)
 signal open_townhall_modal()
 signal open_region_buy_modal(region: Vector2i, price: int)
+signal open_building_info_modal(tile_pos: Vector2i, tile_info: Dictionary)
+signal move_mode_changed(active: bool)
+signal map_tapped()
+signal time_weather_updated(month: int, year: int, jam: float, cuaca: String)
 
 enum ToolMode {
 	ROAD,
@@ -52,6 +56,19 @@ var underground_view_enabled: bool = false
 var underground_root: Node3D = null
 var _police_bonus_active: bool = false
 var _military_bonus_active: bool = false
+var preview_rotation: int = 0
+var moving_from_pos: Vector2i = Vector2i(-1, -1)
+var preview_ghost: Node3D = null
+var weather_helper: WeatherCycleHelper = null
+var night_lights_root: Node3D = null
+var wet_road_root: Node3D = null
+var event_props_root: Node3D = null
+var _weather_hud_accum: float = 0.0
+var ambient_helper: AmbientLifeHelper = null
+var _wave_strip: Node3D = null
+var _river_flow: Node3D = null
+var _traffic_timer: float = 0.0
+var _traffic_is_green: bool = true
 
 @onready var tiles_root: Node3D = $TilesRoot
 @onready var car_controller: CarController = $CarController
@@ -112,6 +129,7 @@ func _ready() -> void:
 		camera_controller.tile_long_pressed.connect(_on_tile_long_pressed)
 
 	_ensure_townhall_exists()
+	city_data.ensure_citizen_wishes()
 	city_data.update_utilities()
 	_police_bonus_active = city_data.has_working_public(CityData.TileType.POLICE)
 	_military_bonus_active = city_data.has_working_public(CityData.TileType.MILITARY)
@@ -121,6 +139,11 @@ func _ready() -> void:
 	_build_landscape_visuals()
 	_build_locked_regions_visuals()
 	_refresh_all_visuals()
+	_setup_weather_cycle()
+	_rebuild_event_visuals()
+	ambient_helper = AmbientLifeHelper.new()
+	add_child(ambient_helper)
+	ambient_helper.setup(city_data.map_landscape == "pantai", _wave_strip, _river_flow)
 	city_updated.emit(city_data)
 	if loaded_from_save:
 		show_toast.emit("Kota berhasil dimuat dari save!")
@@ -134,10 +157,159 @@ func _process(delta: float) -> void:
 		if month_timer >= MONTH_DURATION:
 			month_timer = 0.0
 			_advance_month()
+	if weather_helper:
+		var cam_pos := camera_controller.position if camera_controller else Vector3(16.0, 0.0, 16.0)
+		weather_helper.tick(delta, city_data.game_speed, cam_pos)
+		city_data.waktu_jam = weather_helper.waktu_jam
+		city_data.cuaca_saat_ini = weather_helper.cuaca_saat_ini
+		_weather_hud_accum += delta
+		if _weather_hud_accum >= 0.5:
+			_weather_hud_accum = 0.0
+			time_weather_updated.emit(city_data.month, city_data.year, city_data.waktu_jam, city_data.cuaca_saat_ini)
+	if ambient_helper and city_data.game_speed > 0.0:
+		ambient_helper.tick(delta, forest_trees, tile_visuals)
+	_traffic_timer += delta * maxf(1.0, city_data.game_speed)
+	if _traffic_timer >= 4.0:
+		_traffic_timer = 0.0
+		_traffic_is_green = not _traffic_is_green
+		if car_controller:
+			car_controller.traffic_red_light = not _traffic_is_green
+		_update_traffic_lamp_colors()
+	_update_preview_ghost_position()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_R:
+			rotate_preview()
+		elif event.keycode == KEY_ESCAPE:
+			if moving_from_pos != Vector2i(-1, -1):
+				cancel_move_building()
 
 func set_tool(tool_mode: ToolMode) -> void:
 	current_tool = tool_mode
+	_rebuild_preview_ghost()
 	_refresh_underground_visuals()
+
+func rotate_preview() -> void:
+	preview_rotation = (preview_rotation + 90) % 360
+	if preview_ghost and is_instance_valid(preview_ghost):
+		preview_ghost.rotation_degrees.y = float(preview_rotation)
+	AudioManager.play_sfx(self, "click")
+
+func rotate_building_at(pos: Vector2i) -> void:
+	if not city_data or not city_data.is_valid_tile(pos.x, pos.y):
+		return
+	var tile: Dictionary = city_data.get_tile(pos.x, pos.y)
+	if tile.get("type", CityData.TileType.EMPTY) == CityData.TileType.EMPTY:
+		return
+	var new_rot: int = (int(tile.get("rotation", 0)) + 90) % 360
+	tile["rotation"] = new_rot
+	_update_tile_visual(pos.x, pos.y)
+	AudioManager.play_sfx(self, "click")
+
+static func is_movable_building(tile: Dictionary) -> bool:
+	var tp: int = tile.get("type", CityData.TileType.EMPTY)
+	var lv: int = tile.get("level", 0)
+	if tp in [
+		CityData.TileType.EMPTY, CityData.TileType.ROAD, CityData.TileType.RAIL,
+		CityData.TileType.BUSWAY_LANE, CityData.TileType.FLYOVER, CityData.TileType.RUNWAY
+	]:
+		return false
+	if tp in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I, CityData.TileType.ZONE_MILITARY]:
+		return lv > 0
+	return true
+
+static func is_rotatable_tile(tile: Dictionary) -> bool:
+	var tp: int = tile.get("type", CityData.TileType.EMPTY)
+	if tp == CityData.TileType.EMPTY or tp == CityData.TileType.ROAD:
+		return false
+	return true
+
+func start_move_building(pos: Vector2i) -> void:
+	var tile: Dictionary = city_data.get_tile(pos.x, pos.y)
+	if not is_movable_building(tile):
+		return
+	moving_from_pos = pos
+	_rebuild_preview_ghost()
+	move_mode_changed.emit(true)
+	show_toast.emit("Klik tile kosong tujuan untuk memindahkan bangunan (Esc = Batal)")
+
+func cancel_move_building() -> void:
+	if moving_from_pos == Vector2i(-1, -1):
+		return
+	moving_from_pos = Vector2i(-1, -1)
+	_rebuild_preview_ghost()
+	move_mode_changed.emit(false)
+
+func _is_rotatable_tool(mode: ToolMode) -> bool:
+	return mode in [
+		ToolMode.POWER_PLANT, ToolMode.WATER_TOWER, ToolMode.PARK, ToolMode.FARM,
+		ToolMode.SCHOOL, ToolMode.CLINIC, ToolMode.HOSPITAL, ToolMode.POLICE,
+		ToolMode.MILITARY, ToolMode.MAYOR_OFFICE, ToolMode.FIRE_STATION,
+		ToolMode.TRAIN_STATION, ToolMode.STOP_ANGKOT, ToolMode.STOP_BUS,
+		ToolMode.STOP_BUSWAY, ToolMode.AIRPORT_TERMINAL
+	]
+
+func _rebuild_preview_ghost() -> void:
+	if preview_ghost and is_instance_valid(preview_ghost):
+		preview_ghost.queue_free()
+		preview_ghost = null
+	if not city_data:
+		return
+	if moving_from_pos != Vector2i(-1, -1):
+		var t: Dictionary = city_data.get_tile(moving_from_pos.x, moving_from_pos.y)
+		preview_ghost = BuildingBuilder.create_tile_node(t.get("type", CityData.TileType.EMPTY), t.get("level", 0), t.get("zone", 0), true)
+		preview_ghost.rotation_degrees.y = float(t.get("rotation", 0))
+	elif _is_rotatable_tool(current_tool):
+		var tp := _tool_to_tile_type(current_tool)
+		preview_ghost = BuildingBuilder.create_tile_node(tp, 1 if current_tool == ToolMode.FARM else 0, 0, true)
+		preview_ghost.rotation_degrees.y = float(preview_rotation)
+	if preview_ghost:
+		preview_ghost.scale = Vector3(1.02, 1.02, 1.02)
+		preview_ghost.visible = false
+		add_child(preview_ghost)
+
+func _tool_to_tile_type(mode: ToolMode) -> CityData.TileType:
+	match mode:
+		ToolMode.POWER_PLANT: return CityData.TileType.POWER_PLANT
+		ToolMode.WATER_TOWER: return CityData.TileType.WATER_TOWER
+		ToolMode.PARK: return CityData.TileType.PARK
+		ToolMode.FARM: return CityData.TileType.FARM
+		ToolMode.SCHOOL: return CityData.TileType.SCHOOL
+		ToolMode.CLINIC: return CityData.TileType.CLINIC
+		ToolMode.HOSPITAL: return CityData.TileType.HOSPITAL
+		ToolMode.POLICE: return CityData.TileType.POLICE
+		ToolMode.MILITARY: return CityData.TileType.MILITARY
+		ToolMode.MAYOR_OFFICE: return CityData.TileType.MAYOR_OFFICE
+		ToolMode.FIRE_STATION: return CityData.TileType.FIRE_STATION
+		ToolMode.TRAIN_STATION: return CityData.TileType.TRAIN_STATION
+		ToolMode.STOP_ANGKOT: return CityData.TileType.STOP_ANGKOT
+		ToolMode.STOP_BUS: return CityData.TileType.STOP_BUS
+		ToolMode.STOP_BUSWAY: return CityData.TileType.STOP_BUSWAY
+		ToolMode.AIRPORT_TERMINAL: return CityData.TileType.AIRPORT_TERMINAL
+	return CityData.TileType.EMPTY
+
+func _update_preview_ghost_position() -> void:
+	if not preview_ghost or not is_instance_valid(preview_ghost) or not camera_controller or not camera_controller.camera:
+		return
+	var cam: Camera3D = camera_controller.camera
+	var mouse_pos := get_viewport().get_mouse_position()
+	var ray_origin := cam.project_ray_origin(mouse_pos)
+	var ray_dir := cam.project_ray_normal(mouse_pos)
+	if abs(ray_dir.y) < 0.0001:
+		preview_ghost.visible = false
+		return
+	var t: float = -ray_origin.y / ray_dir.y
+	if t <= 0.0:
+		preview_ghost.visible = false
+		return
+	var hit_pos := ray_origin + ray_dir * t
+	var tc := CityData.world_pos_to_tile(hit_pos)
+	if not city_data.is_valid_tile(tc.x, tc.y):
+		preview_ghost.visible = false
+		return
+	preview_ghost.visible = true
+	preview_ghost.position = CityData.tile_to_world_pos(tc.x, tc.y) + Vector3(0.0, 0.08, 0.0)
 
 func set_underground_view(enabled: bool) -> void:
 	underground_view_enabled = enabled
@@ -214,6 +386,7 @@ func _on_tile_long_pressed(screen_pos: Vector2) -> void:
 		show_toast.emit(msg)
 
 func _on_tile_clicked(screen_pos: Vector2) -> void:
+	map_tapped.emit()
 	if not camera_controller or not camera_controller.camera:
 		return
 
@@ -231,6 +404,36 @@ func _on_tile_clicked(screen_pos: Vector2) -> void:
 	var hit_pos := ray_origin + ray_dir * t
 	var tile_coords := CityData.world_pos_to_tile(hit_pos)
 	var reg := CityData.get_region_for_tile(tile_coords.x, tile_coords.y)
+
+	# 0. Jika sedang mode PINDAH BANGUNAN
+	if moving_from_pos != Vector2i(-1, -1):
+		if tile_coords == moving_from_pos:
+			cancel_move_building()
+			return
+		if not city_data.is_region_unlocked(reg) or not city_data.is_valid_tile(tile_coords.x, tile_coords.y):
+			AudioManager.play_sfx(self, "error")
+			show_toast.emit("Tidak bisa dipindah ke sini")
+			return
+		var src_tile: Dictionary = city_data.get_tile(moving_from_pos.x, moving_from_pos.y)
+		var src_type: int = src_tile.get("type", CityData.TileType.EMPTY)
+		var dst_tile: Dictionary = city_data.get_tile(tile_coords.x, tile_coords.y)
+		if dst_tile.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY or not city_data.is_tile_buildable(tile_coords.x, tile_coords.y, src_type == CityData.TileType.PARK):
+			AudioManager.play_sfx(self, "error")
+			show_toast.emit("Tidak bisa dipindah ke sini")
+			return
+		city_data.set_tile(tile_coords.x, tile_coords.y, src_type, src_tile.get("level", 0), src_tile.get("zone", 0), src_tile.get("rotation", 0))
+		city_data.set_tile(moving_from_pos.x, moving_from_pos.y, CityData.TileType.EMPTY, 0, 0, 0)
+		if not city_data.active_fire.is_empty() and city_data.active_fire.get("pos", Vector2i(-1, -1)) == moving_from_pos:
+			city_data.active_fire["pos"] = tile_coords
+		city_data.update_utilities()
+		_sync_security_bonuses()
+		city_data.happiness = city_data.calculate_happiness()
+		_refresh_all_visuals()
+		cancel_move_building()
+		AudioManager.play_sfx(self, "build")
+		show_toast.emit("Bangunan berhasil dipindah!")
+		city_updated.emit(city_data)
+		return
 
 	if not city_data.is_region_unlocked(reg):
 		if city_data.is_region_allowed_by_landscape(reg):
@@ -276,6 +479,12 @@ func _on_tile_clicked(screen_pos: Vector2) -> void:
 			if f_state in ["damaged_light", "damaged_heavy"]:
 				_repair_fire_damage()
 				return
+
+	# 5. Klik bangunan yang sudah ada -> buka info bangunan (Putar / Pindah)
+	var clicked_tile: Dictionary = city_data.get_tile(tile_coords.x, tile_coords.y)
+	if is_rotatable_tile(clicked_tile) and current_tool not in [ToolMode.BULLDOZER, ToolMode.POWER_CABLE, ToolMode.WATER_PIPE, ToolMode.WIDEN_ROAD, ToolMode.FLYOVER]:
+		open_building_info_modal.emit(tile_coords, clicked_tile)
+		return
 
 	_apply_tool(tile_coords.x, tile_coords.y)
 
@@ -532,7 +741,7 @@ func _apply_tool(x: int, y: int) -> void:
 		if is_instance_valid(tnode2):
 			tnode2.queue_free()
 		forest_trees.erase(f_key2)
-	city_data.set_tile(x, y, target_type, target_level, target_zone)
+	city_data.set_tile(x, y, target_type, target_level, target_zone, preview_rotation)
 	if target_type in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS]:
 		var pos := Vector2i(x, y)
 		city_data.power_cables[pos] = true
@@ -756,6 +965,8 @@ func _advance_month() -> void:
 	# 7. Efek Bulanan Gedung Layanan Publik & Event Kebakaran
 	_apply_public_buildings_monthly()
 	_process_fire_event_monthly()
+	_process_city_events_monthly()
+	_process_citizen_wishes_monthly()
 
 	if citizen_manager:
 		var prev_comp_count: int = city_data.active_complaints.size()
@@ -767,6 +978,7 @@ func _advance_month() -> void:
 	city_data.update_utilities()
 	_sync_security_bonuses()
 	city_data.happiness = city_data.calculate_happiness()
+	city_data.record_monthly_stats()
 	_update_demand()
 	_check_city_tier()
 	_refresh_all_visuals()
@@ -870,7 +1082,10 @@ func _update_tile_visual(x: int, y: int) -> void:
 	var zone: int = tile_info.get("zone", CityData.BuildingZone.RESIDENTIAL)
 	var has_util: bool = tile_info.get("has_utility", true)
 
-	var node := BuildingBuilder.create_wide_road_mesh() if (type == CityData.TileType.ROAD and city_data.wide_roads.has(key)) else BuildingBuilder.create_tile_node(type, level, zone, has_util)
+	var variant: int = absi(x * 7 + y * 13) % 3
+	var node := BuildingBuilder.create_wide_road_mesh() if (type == CityData.TileType.ROAD and city_data.wide_roads.has(key)) else BuildingBuilder.create_tile_node(type, level, zone, has_util, variant)
+	if type == CityData.TileType.ROAD and _count_adjacent_roads(x, y) >= 3:
+		node.add_child(BuildingBuilder.create_intersection_props_node(_traffic_is_green))
 	if not city_data.active_fire.is_empty() and city_data.active_fire.get("pos", Vector2i(-1, -1)) == key:
 		var f_state: String = str(city_data.active_fire.get("state", ""))
 		if f_state == "burning":
@@ -880,6 +1095,7 @@ func _update_tile_visual(x: int, y: int) -> void:
 		elif f_state == "damaged_heavy":
 			node.add_child(BuildingBuilder.create_damaged_badge_node(true))
 	node.position = CityData.tile_to_world_pos(x, y)
+	node.rotation_degrees.y = float(tile_info.get("rotation", 0))
 	tiles_root.add_child(node)
 	tile_visuals[key] = node
 
@@ -1115,6 +1331,10 @@ func resolve_complaint(complaint_id: String, option_idx: int) -> void:
 	if citizen_manager:
 		citizen_manager.resolve_complaint(c_type)
 
+	if c_type in [ComplaintsData.COMPLAINT_EVENT_BANJIR, ComplaintsData.COMPLAINT_EVENT_DEMO] and pop_gain > 0:
+		_archive_active_event()
+		_rebuild_event_visuals()
+
 	var label_action: String = "positif (+%d)" % pop_gain if pop_gain >= 0 else "negatif (%d)" % pop_gain
 	show_toast.emit("Pengaduan diselesaikan! Dampak Popularitas %s" % label_action)
 	city_updated.emit(city_data)
@@ -1184,6 +1404,224 @@ func save_game(is_manual: bool = false) -> bool:
 		show_toast.emit("Permainan berhasil disimpan!")
 	return ok
 
+func _setup_weather_cycle() -> void:
+	if weather_helper and is_instance_valid(weather_helper):
+		return
+	weather_helper = WeatherCycleHelper.new()
+	weather_helper.name = "WeatherCycleHelper"
+	add_child(weather_helper)
+	var p: Node = get_parent()
+	var w_env := p.get_node_or_null("WorldEnvironment") as WorldEnvironment if p else null
+	var d_light := p.get_node_or_null("DirectionalLight3D") as DirectionalLight3D if p else null
+	weather_helper.setup(w_env, d_light, city_data.waktu_jam, city_data.cuaca_saat_ini)
+	weather_helper.night_state_changed.connect(func(_n: bool): _rebuild_night_lights())
+	weather_helper.weather_changed.connect(func(w: String):
+		_rebuild_wet_roads()
+		if citizen_manager:
+			citizen_manager.set_rain_umbrellas(w == "hujan")
+	)
+	_rebuild_night_lights()
+	_rebuild_wet_roads()
+	if citizen_manager:
+		citizen_manager.set_rain_umbrellas(city_data.cuaca_saat_ini == "hujan")
+
+func _rebuild_night_lights() -> void:
+	if not night_lights_root:
+		night_lights_root = Node3D.new()
+		night_lights_root.name = "NightLightsRoot"
+		add_child(night_lights_root)
+	for child in night_lights_root.get_children():
+		night_lights_root.remove_child(child)
+		child.queue_free()
+	if not weather_helper or not weather_helper.is_night or not city_data:
+		return
+	var lamp_mat := StandardMaterial3D.new()
+	lamp_mat.albedo_color = Color(1.0, 0.90, 0.45)
+	lamp_mat.emission_enabled = true
+	lamp_mat.emission = Color(1.0, 0.85, 0.35)
+	lamp_mat.emission_energy_multiplier = 1.2
+	var lamp_mesh := BoxMesh.new()
+	lamp_mesh.size = Vector3(0.18, 0.12, 0.18)
+	for y in range(CityData.GRID_SIZE):
+		for x in range(CityData.GRID_SIZE):
+			var t: Dictionary = city_data.get_tile(x, y)
+			var tp: int = t.get("type", CityData.TileType.EMPTY)
+			if tp == CityData.TileType.ROAD and (x + y) % 2 == 0:
+				var lm := MeshInstance3D.new()
+				lm.mesh = lamp_mesh
+				lm.material_override = lamp_mat
+				lm.position = CityData.tile_to_world_pos(x, y) + Vector3(0.75, 0.65, 0.75)
+				night_lights_root.add_child(lm)
+			elif t.get("level", 0) > 0 and ((x * 5 + y * 3) % 2 == 0):
+				var wm := MeshInstance3D.new()
+				wm.mesh = lamp_mesh
+				wm.material_override = lamp_mat
+				wm.position = CityData.tile_to_world_pos(x, y) + Vector3(0.0, 0.55, 0.48)
+				night_lights_root.add_child(wm)
+
+func _rebuild_wet_roads() -> void:
+	if not wet_road_root:
+		wet_road_root = Node3D.new()
+		wet_road_root.name = "WetRoadRoot"
+		add_child(wet_road_root)
+	for child in wet_road_root.get_children():
+		wet_road_root.remove_child(child)
+		child.queue_free()
+	if not weather_helper or weather_helper.cuaca_saat_ini != "hujan" or not city_data:
+		return
+	var wet_mat := StandardMaterial3D.new()
+	wet_mat.albedo_color = Color(0.08, 0.10, 0.14, 0.42)
+	wet_mat.roughness = 0.15
+	wet_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var wet_mesh := BoxMesh.new()
+	wet_mesh.size = Vector3(1.98, 0.015, 1.98)
+	for y in range(CityData.GRID_SIZE):
+		for x in range(CityData.GRID_SIZE):
+			var tp: int = city_data.get_tile(x, y).get("type", CityData.TileType.EMPTY)
+			if tp in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS]:
+				var wm := MeshInstance3D.new()
+				wm.mesh = wet_mesh
+				wm.material_override = wet_mat
+				wm.position = CityData.tile_to_world_pos(x, y) + Vector3(0.0, 0.042, 0.0)
+				wet_road_root.add_child(wm)
+
+func _archive_active_event() -> void:
+	if city_data.event_aktif.is_empty():
+		return
+	var entry := "%s (Bln %d Th %d)" % [str(city_data.event_aktif.get("title", "Event")), city_data.month, city_data.year]
+	city_data.riwayat_event.push_front(entry)
+	if city_data.riwayat_event.size() > 10:
+		city_data.riwayat_event.resize(10)
+	city_data.event_aktif.clear()
+
+func _process_city_events_monthly() -> void:
+	city_data.flood_cooldown = maxi(0, city_data.flood_cooldown - 1)
+	if not city_data.event_aktif.is_empty():
+		var ev_id: String = str(city_data.event_aktif.get("id", ""))
+		if ev_id == "kuliner":
+			city_data.money += 20000
+		elif ev_id == "pasar_malam":
+			city_data.popularity = clampf(city_data.popularity + 3.0, 0.0, 100.0)
+		elif ev_id == "17an":
+			city_data.popularity = clampf(city_data.popularity + 5.0, 0.0, 100.0)
+		elif ev_id == "demo":
+			city_data.popularity = clampf(city_data.popularity - 3.0, 0.0, 100.0)
+
+		var left: int = int(city_data.event_aktif.get("months_left", 1)) - 1
+		city_data.event_aktif["months_left"] = left
+		if left <= 0:
+			_archive_active_event()
+			_rebuild_event_visuals()
+		return
+
+	city_data.event_cooldown -= 1
+	if city_data.event_cooldown > 0:
+		return
+
+	var pool := [
+		{"id": "kuliner", "title": "Festival Kuliner", "months": 1},
+		{"id": "pasar_malam", "title": "Pasar Malam", "months": 1},
+		{"id": "17an", "title": "Perayaan 17-an", "months": 1}
+	]
+	if city_data.flood_cooldown <= 0 and city_data.population >= 50:
+		pool.append({"id": "banjir", "title": "Hujan Deras + Banjir Kecil", "months": 1})
+	if city_data.popularity < 30.0:
+		pool.append({"id": "demo", "title": "Demo Warga", "months": 2})
+
+	var filtered: Array = []
+	for item in pool:
+		if item["id"] != city_data.last_event_id:
+			filtered.append(item)
+	if filtered.is_empty():
+		filtered = pool
+
+	var chosen: Dictionary = filtered[randi() % filtered.size()]
+	var cid: String = chosen["id"]
+	city_data.last_event_id = cid
+	city_data.event_cooldown = randi_range(2, 4)
+	if cid == "banjir":
+		city_data.flood_cooldown = 12
+	city_data.event_aktif = {
+		"id": cid,
+		"title": chosen["title"],
+		"months_left": chosen["months"],
+		"total_months": chosen["months"]
+	}
+	_rebuild_event_visuals()
+	show_toast.emit("Event: %s dimulai!" % chosen["title"])
+	if citizen_manager:
+		if cid == "banjir":
+			citizen_manager.trigger_custom_complaint(ComplaintsData.COMPLAINT_EVENT_BANJIR, "Jalan Raya")
+		elif cid == "demo":
+			citizen_manager.trigger_custom_complaint(ComplaintsData.COMPLAINT_EVENT_DEMO, "Depan Balai Kota")
+
+func _rebuild_event_visuals() -> void:
+	if not event_props_root:
+		event_props_root = Node3D.new()
+		event_props_root.name = "EventPropsRoot"
+		add_child(event_props_root)
+	for child in event_props_root.get_children():
+		event_props_root.remove_child(child)
+		child.queue_free()
+	if city_data.event_aktif.is_empty():
+		return
+	var ev_id: String = str(city_data.event_aktif.get("id", ""))
+	var center := CityData.tile_to_world_pos(7, 7)
+	var m := MeshInstance3D.new()
+	var b := BoxMesh.new()
+	var mat := StandardMaterial3D.new()
+	if ev_id == "kuliner":
+		b.size = Vector3(1.2, 0.65, 1.2)
+		mat.albedo_color = Color(0.95, 0.55, 0.20)
+		m.position = center + Vector3(2.0, 0.35, 0.0)
+	elif ev_id == "pasar_malam":
+		b.size = Vector3(1.4, 0.70, 1.4)
+		mat.albedo_color = Color(0.85, 0.25, 0.75)
+		mat.emission_enabled = true
+		mat.emission = Color(0.95, 0.45, 0.85)
+		m.position = center + Vector3(-2.0, 0.35, 0.0)
+	elif ev_id == "17an":
+		b.size = Vector3(0.25, 1.6, 0.25)
+		mat.albedo_color = Color(0.92, 0.15, 0.15)
+		m.position = center + Vector3(0.0, 0.8, 2.0)
+	elif ev_id == "banjir":
+		b.size = Vector3(3.8, 0.06, 2.0)
+		mat.albedo_color = Color(0.22, 0.48, 0.78, 0.72)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.position = center + Vector3(0.0, 0.05, 2.0)
+	else:
+		return
+	m.mesh = b
+	m.material_override = mat
+	event_props_root.add_child(m)
+
+func _process_citizen_wishes_monthly() -> void:
+	city_data.ensure_citizen_wishes()
+	for c in city_data.citizens_data:
+		var cid: String = str(c.get("id", ""))
+		if cid.is_empty() or not city_data.keinginan_warga.has(cid):
+			continue
+		var w: Dictionary = city_data.keinginan_warga[cid]
+		if bool(w.get("fulfilled", false)):
+			w["cooldown"] = int(w.get("cooldown", 0)) + 1
+			if int(w["cooldown"]) >= 1:
+				city_data.assign_new_wish(cid)
+		elif city_data.is_wish_fulfilled(str(w.get("type", ""))):
+			w["fulfilled"] = true
+			w["cooldown"] = 0
+			city_data.happiness = clampf(city_data.happiness + 2.0, 0.0, 100.0)
+			city_data.popularity = clampf(city_data.popularity + 1.0, 0.0, 100.0)
+			if citizen_manager:
+				for walker in citizen_manager.walkers:
+					if walker.citizen_data.get("id", "") == cid:
+						walker.thank_you_timer = 3.5
+						citizen_manager._show_bubble(walker, "%s: Makasih, Pak Wali! Keinginanku terpenuhi!" % str(c.get("name", "Warga")), false)
+						break
+		else:
+			w["months"] = int(w.get("months", 0)) + 1
+			if int(w["months"]) >= 3:
+				city_data.assign_new_wish(cid)
+
 func buy_kopaja_bus() -> void:
 	if city_data.bus_kopaja_count >= 3:
 		show_toast.emit("Maksimal 3 Bus Kota (Kopaja)!")
@@ -1249,6 +1687,19 @@ func _build_landscape_visuals() -> void:
 	add_child(landscape_root)
 
 	var l_type: String = city_data.map_landscape
+
+	# Alas rumput dasar 3x3 wilayah (96x96m) agar wilayah terkunci tetap punya warna tanah di bawah kabut
+	var outer_ground := MeshInstance3D.new()
+	var og_box := BoxMesh.new()
+	og_box.size = Vector3(96.0, 0.04, 96.0)
+	var og_mat := StandardMaterial3D.new()
+	og_mat.albedo_color = Color(0.28, 0.54, 0.25)
+	og_mat.roughness = 0.95
+	outer_ground.mesh = og_box
+	outer_ground.material_override = og_mat
+	outer_ground.position = Vector3(16.0, -0.025, 16.0)
+	landscape_root.add_child(outer_ground)
+
 	if l_type == "dataran":
 		return
 
@@ -1256,26 +1707,50 @@ func _build_landscape_visuals() -> void:
 	tile_box.size = Vector3(2.0, 0.04, 2.0)
 
 	if l_type == "pantai":
+		var deep_mat := StandardMaterial3D.new()
+		deep_mat.albedo_color = Color(0.08, 0.34, 0.76)
+		deep_mat.roughness = 0.30
 		var sea_mat := StandardMaterial3D.new()
-		sea_mat.albedo_color = Color(0.14, 0.48, 0.85)
-		sea_mat.roughness = 0.35
+		sea_mat.albedo_color = Color(0.24, 0.68, 0.94)
+		sea_mat.roughness = 0.25
 		var sand_mat := StandardMaterial3D.new()
 		sand_mat.albedo_color = Color(0.92, 0.84, 0.56)
 		sand_mat.roughness = 0.9
 
-		# Laut biru (y=0..1)
+		# Gradasi laut dalam (z=0..2) dan dangkal (z=2..4)
+		var deep_sea := MeshInstance3D.new()
+		var ds_box := BoxMesh.new()
+		ds_box.size = Vector3(96.0, 0.05, 2.2)
+		deep_sea.mesh = ds_box
+		deep_sea.material_override = deep_mat
+		deep_sea.position = Vector3(16.0, 0.018, 1.0)
+		landscape_root.add_child(deep_sea)
+
 		var sea := MeshInstance3D.new()
 		var sea_box := BoxMesh.new()
-		sea_box.size = Vector3(32.0, 0.05, 4.0)
+		sea_box.size = Vector3(96.0, 0.05, 2.0)
 		sea.mesh = sea_box
 		sea.material_override = sea_mat
-		sea.position = Vector3(16.0, 0.02, 2.0)
+		sea.position = Vector3(16.0, 0.02, 3.0)
 		landscape_root.add_child(sea)
 
-		# Pantai pasir (y=2..3)
+		# Ombak putih tipis di tepi pantai
+		var wave := MeshInstance3D.new()
+		var w_box := BoxMesh.new()
+		w_box.size = Vector3(96.0, 0.055, 0.35)
+		var w_mat := StandardMaterial3D.new()
+		w_mat.albedo_color = Color(0.95, 0.98, 1.0, 0.82)
+		w_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wave.mesh = w_box
+		wave.material_override = w_mat
+		wave.position = Vector3(16.0, 0.025, 3.95)
+		landscape_root.add_child(wave)
+		_wave_strip = wave
+
+		# Pantai pasir (y=2..3, membentang 96m kiri-kanan)
 		var sand := MeshInstance3D.new()
 		var sand_box := BoxMesh.new()
-		sand_box.size = Vector3(32.0, 0.04, 4.0)
+		sand_box.size = Vector3(96.0, 0.04, 4.0)
 		sand.mesh = sand_box
 		sand.material_override = sand_mat
 		sand.position = Vector3(16.0, 0.018, 6.0)
@@ -1337,6 +1812,21 @@ func _build_landscape_visuals() -> void:
 		river.position = Vector3(16.0, 0.02, 16.0)
 		landscape_root.add_child(river)
 
+		# Garis arus sungai mengalir pelan
+		_river_flow = Node3D.new()
+		var flow_box := BoxMesh.new()
+		flow_box.size = Vector3(0.22, 0.048, 1.3)
+		var flow_mat := StandardMaterial3D.new()
+		flow_mat.albedo_color = Color(0.55, 0.82, 0.98, 0.65)
+		flow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		for fz in [2.0, 8.0, 14.0, 20.0, 26.0]:
+			var fl := MeshInstance3D.new()
+			fl.mesh = flow_box
+			fl.material_override = flow_mat
+			fl.position = Vector3(16.0, 0.026, fz)
+			_river_flow.add_child(fl)
+		landscape_root.add_child(_river_flow)
+
 		# Tepi sungai coklat lembut (x=6 dan x=9)
 		for bx in [13.0, 19.0]:
 			var bank := MeshInstance3D.new()
@@ -1389,10 +1879,10 @@ func _build_locked_regions_visuals() -> void:
 	add_child(regions_root)
 
 	var fog_adj_mat := StandardMaterial3D.new()
-	fog_adj_mat.albedo_color = Color(0.16, 0.20, 0.22, 0.85)
+	fog_adj_mat.albedo_color = Color(0.14, 0.18, 0.20, 0.45)
 	fog_adj_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	var fog_far_mat := StandardMaterial3D.new()
-	fog_far_mat.albedo_color = Color(0.08, 0.10, 0.12, 0.92)
+	fog_far_mat.albedo_color = Color(0.08, 0.10, 0.12, 0.62)
 	fog_far_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	var lock_gold := StandardMaterial3D.new()
 	lock_gold.albedo_color = Color(0.95, 0.78, 0.22)
@@ -1451,3 +1941,22 @@ func _build_locked_regions_visuals() -> void:
 					lbl.modulate = Color(1.0, 0.88, 0.30)
 				lbl.position = center + Vector3(0.0, 3.0, 0.0)
 				regions_root.add_child(lbl)
+
+func _count_adjacent_roads(x: int, y: int) -> int:
+	var c := 0
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var tp: int = city_data.get_tile(x + d.x, y + d.y).get("type", CityData.TileType.EMPTY)
+		if tp in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS]:
+			c += 1
+	return c
+
+func _update_traffic_lamp_colors() -> void:
+	var col := Color(0.20, 0.92, 0.30) if _traffic_is_green else Color(0.95, 0.22, 0.20)
+	for k in tile_visuals.keys():
+		var nd: Node3D = tile_visuals[k]
+		if nd and is_instance_valid(nd):
+			var lamp := nd.find_child("TrafficLamp", true, false) as MeshInstance3D
+			if lamp and lamp.material_override is StandardMaterial3D:
+				var sm := lamp.material_override as StandardMaterial3D
+				sm.albedo_color = col
+				sm.emission = col

@@ -77,6 +77,28 @@ var btn_water_pipe: Button = null
 var btn_underground: Button = null
 var label_security: Label = null
 var public_tool_defs: Array = []
+var category_popup: PanelContainer = null
+var category_buttons: Dictionary = {}
+var category_containers: Dictionary = {}
+var open_category_id: String = ""
+var tool_to_category: Dictionary = {}
+var btn_rotate_preview: Button = null
+var btn_cancel_move: Button = null
+var building_info_modal: PanelContainer = null
+var lbl_bi_title: Label = null
+var lbl_bi_info: Label = null
+var btn_bi_rotate: Button = null
+var btn_bi_move: Button = null
+var btn_bi_townhall: Button = null
+var _selected_building_pos: Vector2i = Vector2i(-1, -1)
+var weather_icon: S1VisualBuilder.StatIcon = null
+var event_modal: PanelContainer = null
+var lbl_event_info: Label = null
+var stats_backdrop: ColorRect = null
+var stats_modal: PanelContainer = null
+var stats_vbox: VBoxContainer = null
+var photo_helper: PhotoModeHelper = null
+var _prev_speed_before_photo: float = 1.0
 
 # Overlay Bubble Chat 2D (Langkah 5: maks 3 bubble, anti-tumpuk, clamp viewport)
 const MAX_BUBBLES: int = 3
@@ -100,6 +122,10 @@ func _ready() -> void:
 		city_manager.open_citizen_modal.connect(open_citizen_profile_dialog)
 		city_manager.open_townhall_modal.connect(open_townhall_dialog)
 		city_manager.open_region_buy_modal.connect(_open_region_buy_dialog)
+		city_manager.open_building_info_modal.connect(_open_building_info_dialog)
+		city_manager.move_mode_changed.connect(_on_move_mode_changed)
+		city_manager.map_tapped.connect(_close_category_popup)
+		city_manager.time_weather_updated.connect(_on_time_weather_updated)
 
 	tool_buttons = {
 		CityManager.ToolMode.ROAD: btn_road,
@@ -277,6 +303,19 @@ func _select_tool(mode: CityManager.ToolMode) -> void:
 		btn.add_theme_stylebox_override("hover", sb)
 		btn.add_theme_stylebox_override("pressed", sb)
 
+	_refresh_category_highlights()
+	if btn_rotate_preview and city_manager:
+		btn_rotate_preview.visible = city_manager._is_rotatable_tool(mode) or (city_manager.moving_from_pos != Vector2i(-1, -1))
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		if building_info_modal and building_info_modal.visible:
+			building_info_modal.visible = false
+		elif stats_modal and stats_modal.visible:
+			_close_stats_modal()
+		elif category_popup and category_popup.visible:
+			_close_category_popup()
+
 func _select_speed(speed: float) -> void:
 	if city_manager:
 		city_manager.set_game_speed(speed)
@@ -323,19 +362,20 @@ func _on_city_updated(data: CityData) -> void:
 		else:
 			label_security.modulate = Color(1.0, 0.35, 0.35)
 
-	label_power.text = "Listrik: %d/%d" % [data.power_used, data.power_supply]
+	label_power.text = "%d/%d" % [data.power_used, data.power_supply]
 	if data.power_used > data.power_supply:
 		label_power.modulate = Color(1.0, 0.3, 0.3)
 	else:
 		label_power.modulate = Color(0.9, 0.9, 0.9)
 
-	label_water.text = "Air: %d/%d" % [data.water_used, data.water_supply]
+	label_water.text = "%d/%d" % [data.water_used, data.water_supply]
 	if data.water_used > data.water_supply:
 		label_water.modulate = Color(1.0, 0.3, 0.3)
 	else:
 		label_water.modulate = Color(0.9, 0.9, 0.9)
 
-	label_date.text = "Bulan %d, Th %d" % [data.month, data.year]
+	label_date.text = "Bln %d Th %d • %02d:00" % [data.month, data.year, int(data.waktu_jam)]
+	_update_weather_icon(data.cuaca_saat_ini)
 	label_tier.text = "[" + data.city_level + "]"
 
 	bar_r.value = data.demand_r
@@ -426,10 +466,16 @@ func open_citizen_profile_dialog(c_info: Dictionary, comp_info: Dictionary) -> v
 
 	var history: Array = c_info.get("history", [])
 	if label_cp_history:
+		var cid: String = str(c_info.get("id", ""))
+		var wish_line := ""
+		if city_manager and city_manager.city_data and city_manager.city_data.keinginan_warga.has(cid):
+			var w: Dictionary = city_manager.city_data.keinginan_warga[cid]
+			var w_status := "Terpenuhi!" if bool(w.get("fulfilled", false)) else "Belum terpenuhi"
+			wish_line = "\nKeinginan: %s (%s)" % [str(w.get("text", "-")), w_status]
 		if not history.is_empty():
-			label_cp_history.text = "Catatan: \"" + history[0] + "\""
+			label_cp_history.text = "Catatan: \"" + history[0] + "\"" + wish_line
 		else:
-			label_cp_history.text = "Catatan: Warga biasa yang taat aturan."
+			label_cp_history.text = "Catatan: Warga biasa yang taat aturan." + wish_line
 
 	if label_cp_complaint and btn_cp_open_th:
 		if not comp_info.is_empty():
@@ -486,10 +532,29 @@ func _refresh_townhall_list() -> void:
 		return
 
 	var data: CityData = city_manager.city_data
-	th_stats_label.text = "Popularitas: %d%%  |  Kebahagiaan: %d%%  |  Kas: Rp %s" % [
+	var w_total := data.keinginan_warga.size()
+	var w_done := 0
+	var w_counts := {}
+	for k in data.keinginan_warga.keys():
+		var wd: Dictionary = data.keinginan_warga[k]
+		if bool(wd.get("fulfilled", false)):
+			w_done += 1
+		var wt: String = str(wd.get("text", ""))
+		w_counts[wt] = int(w_counts.get(wt, 0)) + 1
+	var top_wishes := ""
+	var shown_w := 0
+	for wt in w_counts.keys():
+		if shown_w >= 3:
+			break
+		top_wishes += (", " if shown_w > 0 else "") + wt
+		shown_w += 1
+	th_stats_label.text = "Popularitas: %d%%  |  Kebahagiaan: %d%%  |  Kas: Rp %s\nKeinginan Warga: %d terpenuhi / %d total (%s)" % [
 		int(round(data.popularity)),
 		int(round(data.happiness)),
-		_format_number(data.money)
+		_format_number(data.money),
+		w_done,
+		w_total,
+		top_wishes if not top_wishes.is_empty() else "-"
 	]
 
 	# Bersihkan daftar kartu lama
@@ -622,14 +687,25 @@ func _show_toast(msg: String) -> void:
 	toast_timer.start(3.0)
 
 func _polish_hud_topbar() -> void:
-	for p_name in ["TopPanel", "RightPanel", "TimeSpeedPanel", "TaxPanel", "FarmPanel", "BottomPalette"]:
+	for p_name in ["RightPanel", "TimeSpeedPanel", "TaxPanel", "FarmPanel", "BottomPalette"]:
 		var p_node := get_node_or_null(p_name) as PanelContainer
 		if p_node:
 			p_node.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 16, 12.0, 8.0, 0.92))
 
+	var top_panel := get_node_or_null("TopPanel") as PanelContainer
+	if top_panel:
+		top_panel.offset_left = 8.0
+		top_panel.offset_right = -8.0
+		top_panel.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 14, 8.0, 6.0, 0.92))
+
 	var top_hbox := get_node_or_null("TopPanel/HBox") as HBoxContainer
 	if not top_hbox:
 		return
+
+	top_hbox.add_theme_constant_override("separation", 4)
+	for child in top_hbox.get_children():
+		if child is VSeparator:
+			child.visible = false
 
 	var icon_map := {
 		"LabelMoney": "money",
@@ -644,18 +720,27 @@ func _polish_hud_topbar() -> void:
 	for lbl in [label_money, label_pop, label_happiness, label_popularity, label_power, label_water, label_date, label_tier]:
 		if not lbl or not is_instance_valid(lbl):
 			continue
+		lbl.add_theme_font_size_override("font_size", 13)
 		var idx: int = lbl.get_index()
 		var chip := PanelContainer.new()
 		chip.add_theme_stylebox_override("panel", chip_style)
 		var chbox := HBoxContainer.new()
-		chbox.add_theme_constant_override("separation", 5)
+		chbox.add_theme_constant_override("separation", 3)
 		chip.add_child(chbox)
 		if icon_map.has(lbl.name):
-			chbox.add_child(S1VisualBuilder.StatIcon.new(icon_map[lbl.name]))
+			var ic := S1VisualBuilder.StatIcon.new(icon_map[lbl.name])
+			chbox.add_child(ic)
+			if lbl.name == "LabelDate":
+				weather_icon = S1VisualBuilder.StatIcon.new("sun")
+				chbox.add_child(weather_icon)
 		top_hbox.remove_child(lbl)
 		chbox.add_child(lbl)
 		top_hbox.add_child(chip)
 		top_hbox.move_child(chip, idx)
+
+	if btn_townhall:
+		btn_townhall.custom_minimum_size = Vector2(92, 30)
+		btn_townhall.add_theme_font_size_override("font_size", 12)
 
 	if btn_sell_wheat:
 		UIThemeHelper.apply_btn_primary(btn_sell_wheat, 40.0)
@@ -665,83 +750,80 @@ func _polish_hud_topbar() -> void:
 		label_security = Label.new()
 		label_security.name = "LabelSecurity"
 		label_security.text = "Aman: 50%"
+		label_security.add_theme_font_size_override("font_size", 13)
 		var sec_chip := PanelContainer.new()
 		sec_chip.add_theme_stylebox_override("panel", chip_style)
 		var sch := HBoxContainer.new()
-		sch.add_theme_constant_override("separation", 5)
+		sch.add_theme_constant_override("separation", 3)
 		sch.add_child(S1VisualBuilder.StatIcon.new("security"))
 		sch.add_child(label_security)
 		sec_chip.add_child(sch)
 		top_hbox.add_child(sec_chip)
-		var pop_chip := label_popularity.get_parent().get_parent()
+		var pop_chip: Node = label_popularity.get_parent().get_parent()
 		if pop_chip and pop_chip.get_parent() == top_hbox:
 			top_hbox.move_child(sec_chip, pop_chip.get_index() + 1)
 
 func _setup_utility_buttons() -> void:
 	var palette := get_node_or_null("BottomPalette") as PanelContainer
 	var hbox := get_node_or_null("BottomPalette/HBox") as HBoxContainer
-	if not hbox:
+	if not palette or not hbox:
 		return
 
-	# Bungkus HBox dengan ScrollContainer agar 19 tombol muat rapi di 1280x720
-	if palette and hbox.get_parent() == palette:
-		var scroll := ScrollContainer.new()
-		scroll.name = "ToolScroll"
-		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-		scroll.custom_minimum_size = Vector2(1180, 54)
-		palette.remove_child(hbox)
-		scroll.add_child(hbox)
-		palette.add_child(scroll)
+	# Sesuaikan lebar BottomPalette agar 6 kategori + tombol Bawah Tanah muat tanpa scroll di 1280x720
+	palette.offset_left = -540.0
+	palette.offset_right = 540.0
+	palette.offset_top = -70.0
+	palette.offset_bottom = -8.0
 
 	btn_power_cable = Button.new()
 	btn_power_cable.name = "BtnPowerCable"
 	btn_power_cable.text = "Kabel\nRp 1.000"
-	btn_power_cable.custom_minimum_size = Vector2(76, 44)
+	btn_power_cable.custom_minimum_size = Vector2(90, 44)
 	btn_power_cable.add_theme_font_size_override("font_size", 11)
-	hbox.add_child(btn_power_cable)
-	hbox.move_child(btn_power_cable, btn_bulldozer.get_index())
+	tool_buttons[CityManager.ToolMode.POWER_CABLE] = btn_power_cable
 
 	btn_water_pipe = Button.new()
 	btn_water_pipe.name = "BtnWaterPipe"
 	btn_water_pipe.text = "Pipa\nRp 1.000"
-	btn_water_pipe.custom_minimum_size = Vector2(76, 44)
+	btn_water_pipe.custom_minimum_size = Vector2(90, 44)
 	btn_water_pipe.add_theme_font_size_override("font_size", 11)
-	hbox.add_child(btn_water_pipe)
-	hbox.move_child(btn_water_pipe, btn_bulldozer.get_index())
+	tool_buttons[CityManager.ToolMode.WATER_PIPE] = btn_water_pipe
 
 	var pub_specs := [
-		{"name": "BtnSchool", "label": "Sekolah", "price_txt": "Rp75rb", "mode": CityManager.ToolMode.SCHOOL, "tile_type": CityData.TileType.SCHOOL, "cost": CityData.COST_SCHOOL},
-		{"name": "BtnClinic", "label": "Puskesmas", "price_txt": "Rp60rb", "mode": CityManager.ToolMode.CLINIC, "tile_type": CityData.TileType.CLINIC, "cost": CityData.COST_CLINIC},
-		{"name": "BtnHospital", "label": "Rumah Sakit", "price_txt": "Rp250rb", "mode": CityManager.ToolMode.HOSPITAL, "tile_type": CityData.TileType.HOSPITAL, "cost": CityData.COST_HOSPITAL},
-		{"name": "BtnPolice", "label": "Polisi", "price_txt": "Rp100rb", "mode": CityManager.ToolMode.POLICE, "tile_type": CityData.TileType.POLICE, "cost": CityData.COST_POLICE},
-		{"name": "BtnMilitary", "label": "Markas TNI", "price_txt": "Rp200rb", "mode": CityManager.ToolMode.MILITARY, "tile_type": CityData.TileType.MILITARY, "cost": CityData.COST_MILITARY},
-		{"name": "BtnMayorOffice", "label": "Ktr Walikota", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.MAYOR_OFFICE, "tile_type": CityData.TileType.MAYOR_OFFICE, "cost": CityData.COST_MAYOR_OFFICE},
-		{"name": "BtnFireStation", "label": "Damkar", "price_txt": "Rp120rb", "mode": CityManager.ToolMode.FIRE_STATION, "tile_type": CityData.TileType.FIRE_STATION, "cost": CityData.COST_FIRE_STATION},
-		{"name": "BtnZoneMilitary", "label": "Z. Militer", "price_txt": "Rp2rb", "mode": CityManager.ToolMode.ZONE_MILITARY, "tile_type": CityData.TileType.ZONE_MILITARY, "cost": CityData.COST_ZONE_MILITARY},
-		{"name": "BtnTrainStation", "label": "Stasiun", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.TRAIN_STATION, "tile_type": CityData.TileType.TRAIN_STATION, "cost": CityData.COST_TRAIN_STATION},
-		{"name": "BtnRail", "label": "Rel Kereta", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.RAIL, "tile_type": CityData.TileType.RAIL, "cost": CityData.COST_RAIL},
-		{"name": "BtnStopAngkot", "label": "Hlt Angkot", "price_txt": "Rp10rb", "mode": CityManager.ToolMode.STOP_ANGKOT, "tile_type": CityData.TileType.STOP_ANGKOT, "cost": CityData.COST_STOP_ANGKOT},
-		{"name": "BtnStopBus", "label": "Hlt Bus", "price_txt": "Rp15rb", "mode": CityManager.ToolMode.STOP_BUS, "tile_type": CityData.TileType.STOP_BUS, "cost": CityData.COST_STOP_BUS},
-		{"name": "BtnBuswayLane", "label": "Jlr Busway", "price_txt": "Rp8rb", "mode": CityManager.ToolMode.BUSWAY_LANE, "tile_type": CityData.TileType.BUSWAY_LANE, "cost": CityData.COST_BUSWAY_LANE},
-		{"name": "BtnStopBusway", "label": "Hlt Busway", "price_txt": "Rp25rb", "mode": CityManager.ToolMode.STOP_BUSWAY, "tile_type": CityData.TileType.STOP_BUSWAY, "cost": CityData.COST_STOP_BUSWAY},
-		{"name": "BtnWidenRoad", "label": "Lebarin Jln", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.WIDEN_ROAD, "tile_type": CityData.TileType.ROAD, "cost": CityData.COST_WIDEN_ROAD},
-		{"name": "BtnFlyover", "label": "Flyover", "price_txt": "Rp20rb", "mode": CityManager.ToolMode.FLYOVER, "tile_type": CityData.TileType.FLYOVER, "cost": CityData.COST_FLYOVER},
-		{"name": "BtnRunway", "label": "Landasan", "price_txt": "Rp5rb", "mode": CityManager.ToolMode.RUNWAY, "tile_type": CityData.TileType.RUNWAY, "cost": CityData.COST_RUNWAY},
-		{"name": "BtnTerminal", "label": "Terminal", "price_txt": "Rp300rb", "mode": CityManager.ToolMode.AIRPORT_TERMINAL, "tile_type": CityData.TileType.AIRPORT_TERMINAL, "cost": CityData.COST_AIRPORT_TERMINAL}
+		{"name": "BtnSchool", "label": "Sekolah", "price_txt": "Rp75rb", "mode": CityManager.ToolMode.SCHOOL, "tile_type": CityData.TileType.SCHOOL, "cost": CityData.COST_SCHOOL, "cat": "publik"},
+		{"name": "BtnClinic", "label": "Puskesmas", "price_txt": "Rp60rb", "mode": CityManager.ToolMode.CLINIC, "tile_type": CityData.TileType.CLINIC, "cost": CityData.COST_CLINIC, "cat": "publik"},
+		{"name": "BtnHospital", "label": "Rumah Sakit", "price_txt": "Rp250rb", "mode": CityManager.ToolMode.HOSPITAL, "tile_type": CityData.TileType.HOSPITAL, "cost": CityData.COST_HOSPITAL, "cat": "publik"},
+		{"name": "BtnPolice", "label": "Polisi", "price_txt": "Rp100rb", "mode": CityManager.ToolMode.POLICE, "tile_type": CityData.TileType.POLICE, "cost": CityData.COST_POLICE, "cat": "publik"},
+		{"name": "BtnMilitary", "label": "Markas TNI", "price_txt": "Rp200rb", "mode": CityManager.ToolMode.MILITARY, "tile_type": CityData.TileType.MILITARY, "cost": CityData.COST_MILITARY, "cat": "publik"},
+		{"name": "BtnMayorOffice", "label": "Ktr Walikota", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.MAYOR_OFFICE, "tile_type": CityData.TileType.MAYOR_OFFICE, "cost": CityData.COST_MAYOR_OFFICE, "cat": "publik"},
+		{"name": "BtnFireStation", "label": "Damkar", "price_txt": "Rp120rb", "mode": CityManager.ToolMode.FIRE_STATION, "tile_type": CityData.TileType.FIRE_STATION, "cost": CityData.COST_FIRE_STATION, "cat": "publik"},
+		{"name": "BtnZoneMilitary", "label": "Z. Militer", "price_txt": "Rp2rb", "mode": CityManager.ToolMode.ZONE_MILITARY, "tile_type": CityData.TileType.ZONE_MILITARY, "cost": CityData.COST_ZONE_MILITARY, "cat": "zona"},
+		{"name": "BtnTrainStation", "label": "Stasiun", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.TRAIN_STATION, "tile_type": CityData.TileType.TRAIN_STATION, "cost": CityData.COST_TRAIN_STATION, "cat": "transport"},
+		{"name": "BtnRail", "label": "Rel Kereta", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.RAIL, "tile_type": CityData.TileType.RAIL, "cost": CityData.COST_RAIL, "cat": "transport"},
+		{"name": "BtnStopAngkot", "label": "Hlt Angkot", "price_txt": "Rp10rb", "mode": CityManager.ToolMode.STOP_ANGKOT, "tile_type": CityData.TileType.STOP_ANGKOT, "cost": CityData.COST_STOP_ANGKOT, "cat": "transport"},
+		{"name": "BtnStopBus", "label": "Hlt Bus", "price_txt": "Rp15rb", "mode": CityManager.ToolMode.STOP_BUS, "tile_type": CityData.TileType.STOP_BUS, "cost": CityData.COST_STOP_BUS, "cat": "transport"},
+		{"name": "BtnBuswayLane", "label": "Jlr Busway", "price_txt": "Rp8rb", "mode": CityManager.ToolMode.BUSWAY_LANE, "tile_type": CityData.TileType.BUSWAY_LANE, "cost": CityData.COST_BUSWAY_LANE, "cat": "transport"},
+		{"name": "BtnStopBusway", "label": "Hlt Busway", "price_txt": "Rp25rb", "mode": CityManager.ToolMode.STOP_BUSWAY, "tile_type": CityData.TileType.STOP_BUSWAY, "cost": CityData.COST_STOP_BUSWAY, "cat": "transport"},
+		{"name": "BtnWidenRoad", "label": "Lebarin Jln", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.WIDEN_ROAD, "tile_type": CityData.TileType.ROAD, "cost": CityData.COST_WIDEN_ROAD, "cat": "jalan"},
+		{"name": "BtnFlyover", "label": "Flyover", "price_txt": "Rp20rb", "mode": CityManager.ToolMode.FLYOVER, "tile_type": CityData.TileType.FLYOVER, "cost": CityData.COST_FLYOVER, "cat": "jalan"},
+		{"name": "BtnRunway", "label": "Landasan", "price_txt": "Rp5rb", "mode": CityManager.ToolMode.RUNWAY, "tile_type": CityData.TileType.RUNWAY, "cost": CityData.COST_RUNWAY, "cat": "transport"},
+		{"name": "BtnTerminal", "label": "Terminal", "price_txt": "Rp300rb", "mode": CityManager.ToolMode.AIRPORT_TERMINAL, "tile_type": CityData.TileType.AIRPORT_TERMINAL, "cost": CityData.COST_AIRPORT_TERMINAL, "cat": "transport"}
 	]
 	public_tool_defs.clear()
+	var extra_cat_btns := {}
 	for spec in pub_specs:
 		var b := Button.new()
 		b.name = spec["name"]
 		b.text = "%s\n%s" % [spec["label"], spec["price_txt"]]
-		b.custom_minimum_size = Vector2(96, 44)
-		b.add_theme_font_size_override("font_size", 10)
+		b.custom_minimum_size = Vector2(102, 46)
+		b.add_theme_font_size_override("font_size", 11)
 		var m_val: CityManager.ToolMode = spec["mode"]
 		b.pressed.connect(func(): _select_tool(m_val))
-		hbox.add_child(b)
-		hbox.move_child(b, btn_bulldozer.get_index())
 		tool_buttons[m_val] = b
+		tool_to_category[m_val] = spec["cat"]
+		if not extra_cat_btns.has(spec["cat"]):
+			extra_cat_btns[spec["cat"]] = []
+		extra_cat_btns[spec["cat"]].append(b)
 		public_tool_defs.append({
 			"btn": b,
 			"label": spec["label"],
@@ -750,12 +832,119 @@ func _setup_utility_buttons() -> void:
 			"cost": spec["cost"]
 		})
 
+	# Petakan tool bawaan ke kategori masing-masing
+	tool_to_category[CityManager.ToolMode.ROAD] = "jalan"
+	tool_to_category[CityManager.ToolMode.BULLDOZER] = "jalan"
+	tool_to_category[CityManager.ToolMode.ZONE_R] = "zona"
+	tool_to_category[CityManager.ToolMode.ZONE_C] = "zona"
+	tool_to_category[CityManager.ToolMode.ZONE_I] = "zona"
+	tool_to_category[CityManager.ToolMode.POWER_PLANT] = "utilitas"
+	tool_to_category[CityManager.ToolMode.WATER_TOWER] = "utilitas"
+	tool_to_category[CityManager.ToolMode.POWER_CABLE] = "utilitas"
+	tool_to_category[CityManager.ToolMode.WATER_PIPE] = "utilitas"
+	tool_to_category[CityManager.ToolMode.PARK] = "taman"
+	tool_to_category[CityManager.ToolMode.FARM] = "taman"
+
+	# Buat panel popup kategori di atas BottomPalette
+	category_popup = PanelContainer.new()
+	category_popup.name = "CategoryPopup"
+	category_popup.visible = false
+	category_popup.anchor_left = 0.5
+	category_popup.anchor_right = 0.5
+	category_popup.anchor_top = 1.0
+	category_popup.anchor_bottom = 1.0
+	category_popup.offset_top = -180.0
+	category_popup.offset_bottom = -78.0
+	category_popup.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	category_popup.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	category_popup.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 16, 12.0, 10.0, 0.96))
+	add_child(category_popup)
+
+	var popup_wrap := VBoxContainer.new()
+	popup_wrap.add_theme_constant_override("separation", 6)
+	category_popup.add_child(popup_wrap)
+
+	var cat_defs := [
+		{"id": "jalan", "title": "Jalan", "w": 115},
+		{"id": "zona", "title": "Zona", "w": 115},
+		{"id": "utilitas", "title": "Utilitas", "w": 115},
+		{"id": "publik", "title": "Layanan Publik", "w": 145},
+		{"id": "transport", "title": "Transportasi", "w": 135},
+		{"id": "taman", "title": "Taman & Alam", "w": 135}
+	]
+
+	for cd in cat_defs:
+		var cid: String = cd["id"]
+		var grid := GridContainer.new()
+		grid.columns = 6 if cid == "transport" else (4 if cid in ["jalan", "zona", "utilitas", "publik"] else 2)
+		grid.add_theme_constant_override("h_separation", 8)
+		grid.add_theme_constant_override("v_separation", 8)
+		grid.visible = false
+		popup_wrap.add_child(grid)
+		category_containers[cid] = grid
+
+	# Pindahkan tombol bawaan dari BottomPalette/HBox ke container kategorinya
+	var move_pairs := [
+		[btn_road, "jalan"], [btn_bulldozer, "jalan"],
+		[btn_zone_r, "zona"], [btn_zone_c, "zona"], [btn_zone_i, "zona"],
+		[btn_power, "utilitas"], [btn_water, "utilitas"], [btn_power_cable, "utilitas"], [btn_water_pipe, "utilitas"],
+		[btn_park, "taman"], [btn_farm, "taman"]
+	]
+	for mp in move_pairs:
+		var b_node: Button = mp[0]
+		var target_cid: String = mp[1]
+		if b_node and b_node.get_parent():
+			b_node.get_parent().remove_child(b_node)
+		if b_node:
+			b_node.custom_minimum_size = Vector2(102, 46)
+			b_node.add_theme_font_size_override("font_size", 11)
+			category_containers[target_cid].add_child(b_node)
+
+	for cid in extra_cat_btns.keys():
+		for b_node in extra_cat_btns[cid]:
+			category_containers[cid].add_child(b_node)
+
+	# Urutkan ulang Jalan: Jalan, Lebarin Jln, Flyover, Bulldozer
+	var g_jalan: GridContainer = category_containers["jalan"]
+	g_jalan.move_child(btn_bulldozer, g_jalan.get_child_count() - 1)
+
+	# Tombol beli armada di kategori Transportasi
+	var buy_specs := [
+		{"name": "BtnBuyKopaja", "text": "+Kopaja\nRp80rb", "fn": func(): if city_manager: city_manager.buy_kopaja_bus()},
+		{"name": "BtnBuyBusway", "text": "+Busway\nRp120rb", "fn": func(): if city_manager: city_manager.buy_busway_unit()},
+		{"name": "BtnBuyPlane", "text": "+Pesawat\nRp200rb", "fn": func(): if city_manager: city_manager.buy_airplane()}
+	]
+	for bsp in buy_specs:
+		var bb := Button.new()
+		bb.name = bsp["name"]
+		bb.text = bsp["text"]
+		bb.custom_minimum_size = Vector2(102, 46)
+		bb.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(bb, 46.0)
+		bb.pressed.connect(bsp["fn"])
+		category_containers["transport"].add_child(bb)
+
+	# Isi BottomPalette/HBox dengan 6 tombol kategori + toggle Bawah Tanah
+	hbox.add_theme_constant_override("separation", 8)
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	category_buttons.clear()
+	for cd in cat_defs:
+		var cid: String = cd["id"]
+		var cb := Button.new()
+		cb.text = cd["title"]
+		cb.custom_minimum_size = Vector2(cd["w"], 44)
+		cb.add_theme_font_size_override("font_size", 13)
+		UIThemeHelper.apply_btn_secondary(cb, 44.0)
+		cb.pressed.connect(func(): _toggle_category(cid))
+		hbox.add_child(cb)
+		category_buttons[cid] = cb
+
 	btn_underground = Button.new()
 	btn_underground.name = "BtnUnderground"
 	btn_underground.toggle_mode = true
-	btn_underground.text = "Bawah\nTanah"
-	btn_underground.custom_minimum_size = Vector2(74, 44)
-	btn_underground.add_theme_font_size_override("font_size", 11)
+	btn_underground.text = "Bawah Tanah"
+	btn_underground.custom_minimum_size = Vector2(120, 44)
+	btn_underground.add_theme_font_size_override("font_size", 12)
 	UIThemeHelper.apply_btn_secondary(btn_underground, 44.0)
 	btn_underground.toggled.connect(func(pressed_on: bool):
 		AudioManager.play_sfx(self, "click")
@@ -768,20 +957,454 @@ func _setup_utility_buttons() -> void:
 	)
 	hbox.add_child(btn_underground)
 
-	var buy_specs := [
-		{"name": "BtnBuyKopaja", "text": "+Kopaja\nRp80rb", "fn": func(): if city_manager: city_manager.buy_kopaja_bus()},
-		{"name": "BtnBuyBusway", "text": "+Busway\nRp120rb", "fn": func(): if city_manager: city_manager.buy_busway_unit()},
-		{"name": "BtnBuyPlane", "text": "+Pesawat\nRp200rb", "fn": func(): if city_manager: city_manager.buy_airplane()}
+	_setup_rotate_move_controls()
+	_setup_building_info_modal()
+	_setup_event_modal()
+	_setup_stats_modal()
+	_setup_photo_mode()
+
+func _toggle_category(cid: String) -> void:
+	AudioManager.play_sfx(self, "click")
+	if open_category_id == cid and category_popup.visible:
+		_close_category_popup()
+		return
+	open_category_id = cid
+	for k in category_containers.keys():
+		category_containers[k].visible = (k == cid)
+	category_popup.visible = true
+	_refresh_category_highlights()
+
+func _close_category_popup() -> void:
+	if category_popup:
+		category_popup.visible = false
+	open_category_id = ""
+	_refresh_category_highlights()
+
+func _refresh_category_highlights() -> void:
+	var active_cat: String = str(tool_to_category.get(city_manager.current_tool if city_manager else CityManager.ToolMode.ROAD, ""))
+	for cid in category_buttons.keys():
+		var cb: Button = category_buttons[cid]
+		var is_hl: bool = (cid == open_category_id) or (cid == active_cat)
+		if is_hl:
+			UIThemeHelper.apply_btn_primary(cb, 44.0)
+		else:
+			UIThemeHelper.apply_btn_secondary(cb, 44.0)
+
+func _setup_rotate_move_controls() -> void:
+	var ctrl_box := HBoxContainer.new()
+	ctrl_box.anchor_left = 1.0
+	ctrl_box.anchor_top = 1.0
+	ctrl_box.anchor_right = 1.0
+	ctrl_box.anchor_bottom = 1.0
+	ctrl_box.offset_left = -250.0
+	ctrl_box.offset_top = -124.0
+	ctrl_box.offset_right = -14.0
+	ctrl_box.offset_bottom = -80.0
+	ctrl_box.alignment = BoxContainer.ALIGNMENT_END
+	ctrl_box.add_theme_constant_override("separation", 8)
+	add_child(ctrl_box)
+
+	btn_rotate_preview = Button.new()
+	btn_rotate_preview.text = "Putar (R)"
+	btn_rotate_preview.visible = false
+	btn_rotate_preview.custom_minimum_size = Vector2(105, 38)
+	UIThemeHelper.apply_btn_primary(btn_rotate_preview, 38.0)
+	btn_rotate_preview.pressed.connect(func():
+		if city_manager:
+			city_manager.rotate_preview()
+	)
+	ctrl_box.add_child(btn_rotate_preview)
+
+	btn_cancel_move = Button.new()
+	btn_cancel_move.text = "Batal (Esc)"
+	btn_cancel_move.visible = false
+	btn_cancel_move.custom_minimum_size = Vector2(105, 38)
+	UIThemeHelper.apply_btn_secondary(btn_cancel_move, 38.0)
+	btn_cancel_move.pressed.connect(func():
+		if city_manager:
+			city_manager.cancel_move_building()
+	)
+	ctrl_box.add_child(btn_cancel_move)
+
+func _on_move_mode_changed(active: bool) -> void:
+	if btn_cancel_move:
+		btn_cancel_move.visible = active
+	if btn_rotate_preview and city_manager:
+		btn_rotate_preview.visible = active or city_manager._is_rotatable_tool(city_manager.current_tool)
+
+func _setup_building_info_modal() -> void:
+	building_info_modal = PanelContainer.new()
+	building_info_modal.visible = false
+	building_info_modal.set_anchors_preset(Control.PRESET_CENTER)
+	building_info_modal.custom_minimum_size = Vector2(360, 0)
+	building_info_modal.offset_left = -180.0
+	building_info_modal.offset_top = -110.0
+	building_info_modal.offset_right = 180.0
+	building_info_modal.offset_bottom = 110.0
+	building_info_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 16, 18.0, 14.0, 0.96))
+	add_child(building_info_modal)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	building_info_modal.add_child(vb)
+
+	lbl_bi_title = Label.new()
+	lbl_bi_title.add_theme_font_size_override("font_size", 17)
+	lbl_bi_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.28))
+	vb.add_child(lbl_bi_title)
+
+	lbl_bi_info = Label.new()
+	lbl_bi_info.add_theme_font_size_override("font_size", 13)
+	vb.add_child(lbl_bi_info)
+
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 8)
+	vb.add_child(hb)
+
+	btn_bi_rotate = Button.new()
+	btn_bi_rotate.text = "Putar 90°"
+	UIThemeHelper.apply_btn_primary(btn_bi_rotate, 38.0)
+	btn_bi_rotate.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_bi_rotate.pressed.connect(func():
+		if city_manager and _selected_building_pos != Vector2i(-1, -1):
+			city_manager.rotate_building_at(_selected_building_pos)
+			var t := city_manager.city_data.get_tile(_selected_building_pos.x, _selected_building_pos.y)
+			_update_building_info_text(t)
+	)
+	hb.add_child(btn_bi_rotate)
+
+	btn_bi_move = Button.new()
+	btn_bi_move.text = "Pindah"
+	UIThemeHelper.apply_btn_secondary(btn_bi_move, 38.0)
+	btn_bi_move.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn_bi_move.pressed.connect(func():
+		building_info_modal.visible = false
+		if city_manager and _selected_building_pos != Vector2i(-1, -1):
+			city_manager.start_move_building(_selected_building_pos)
+	)
+	hb.add_child(btn_bi_move)
+
+	btn_bi_townhall = Button.new()
+	btn_bi_townhall.text = "Buka Balai Kota"
+	UIThemeHelper.apply_btn_secondary(btn_bi_townhall, 38.0)
+	btn_bi_townhall.visible = false
+	btn_bi_townhall.pressed.connect(func():
+		building_info_modal.visible = false
+		open_townhall_dialog()
+	)
+	vb.add_child(btn_bi_townhall)
+
+	var btn_close := Button.new()
+	btn_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_close, 36.0)
+	btn_close.pressed.connect(func(): building_info_modal.visible = false)
+	vb.add_child(btn_close)
+
+func _open_building_info_dialog(tile_pos: Vector2i, tile_info: Dictionary) -> void:
+	if not building_info_modal:
+		return
+	_selected_building_pos = tile_pos
+	lbl_bi_title.text = "Info Bangunan (%d, %d)" % [tile_pos.x, tile_pos.y]
+	_update_building_info_text(tile_info)
+	btn_bi_move.visible = CityManager.is_movable_building(tile_info)
+	var tp: int = tile_info.get("type", CityData.TileType.EMPTY)
+	btn_bi_townhall.visible = (tp == CityData.TileType.TOWNHALL or tp == CityData.TileType.MAYOR_OFFICE)
+	building_info_modal.visible = true
+
+func _update_building_info_text(tile_info: Dictionary) -> void:
+	var rot: int = int(tile_info.get("rotation", 0))
+	var util_txt: String = "Aktif" if tile_info.get("has_utility", true) else "Kurang Listrik/Air!"
+	lbl_bi_info.text = "Arah hadap: %d°  |  Utilitas: %s" % [rot, util_txt]
+
+func _on_time_weather_updated(month: int, year: int, jam: float, cuaca: String) -> void:
+	if label_date:
+		label_date.text = "Bln %d Th %d • %02d:00" % [month, year, int(jam)]
+	_update_weather_icon(cuaca)
+
+func _update_weather_icon(cuaca: String) -> void:
+	if not weather_icon:
+		return
+	var target_icon := "sun"
+	if cuaca == "berawan":
+		target_icon = "cloud"
+	elif cuaca == "hujan":
+		target_icon = "rain"
+	if weather_icon.icon_type != target_icon:
+		weather_icon.icon_type = target_icon
+		weather_icon.queue_redraw()
+
+func _setup_event_modal() -> void:
+	var top_hbox := get_node_or_null("TopPanel/HBox") as HBoxContainer
+	if top_hbox and btn_townhall:
+		var btn_ev := Button.new()
+		btn_ev.name = "BtnEvent"
+		btn_ev.text = "Event"
+		btn_ev.custom_minimum_size = Vector2(56, 30)
+		btn_ev.add_theme_font_size_override("font_size", 12)
+		UIThemeHelper.apply_btn_secondary(btn_ev, 30.0)
+		btn_ev.pressed.connect(_open_event_modal)
+		top_hbox.add_child(btn_ev)
+		top_hbox.move_child(btn_ev, btn_townhall.get_index())
+
+	event_modal = PanelContainer.new()
+	event_modal.visible = false
+	event_modal.set_anchors_preset(Control.PRESET_CENTER)
+	event_modal.offset_left = -220.0
+	event_modal.offset_top = -150.0
+	event_modal.offset_right = 220.0
+	event_modal.offset_bottom = 150.0
+	event_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 16, 18.0, 14.0, 0.96))
+	add_child(event_modal)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	event_modal.add_child(vb)
+
+	var title := Label.new()
+	title.text = "Kalender Event Kota"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.28))
+	vb.add_child(title)
+
+	lbl_event_info = Label.new()
+	lbl_event_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_event_info.add_theme_font_size_override("font_size", 13)
+	vb.add_child(lbl_event_info)
+
+	var btn_close := Button.new()
+	btn_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_close, 36.0)
+	btn_close.pressed.connect(func(): event_modal.visible = false)
+	vb.add_child(btn_close)
+
+func _open_event_modal() -> void:
+	if not event_modal or not city_manager or not city_manager.city_data:
+		return
+	var d := city_manager.city_data
+	var cur_txt := "Tidak ada event berjalan" if d.event_aktif.is_empty() else "%s (%d bln tersisa)" % [str(d.event_aktif.get("title", "")), int(d.event_aktif.get("months_left", 1))]
+	var next_txt := "Sedang berlangsung" if not d.event_aktif.is_empty() else "Perkiraan %d bulan lagi" % maxi(1, d.event_cooldown)
+	var hist_lines := ""
+	for i in range(mini(3, d.riwayat_event.size())):
+		hist_lines += "\n- %s" % str(d.riwayat_event[i])
+	if hist_lines.is_empty():
+		hist_lines = "\n- Belum ada riwayat event"
+	lbl_event_info.text = "Event Berjalan: %s\nEvent Berikutnya: %s\n\n3 Riwayat Terakhir:%s" % [cur_txt, next_txt, hist_lines]
+	event_modal.visible = true
+
+class StatsLineChart extends Control:
+	var values: Array = []
+
+	func _init(p_vals: Array) -> void:
+		values = p_vals
+		custom_minimum_size = Vector2(460, 72)
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.08, 0.10, 0.15, 0.85))
+		if values.is_empty():
+			draw_string(ThemeDB.fallback_font, Vector2(12, 40), "Belum ada data bulanan", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.65, 0.68, 0.74))
+			return
+		var min_v: float = float(values[0])
+		var max_v: float = float(values[0])
+		for v in values:
+			min_v = minf(min_v, float(v))
+			max_v = maxf(max_v, float(v))
+		var span: float = maxf(1.0, max_v - min_v)
+		var pad_x: float = 14.0
+		var pad_y: float = 10.0
+		var w: float = size.x - pad_x * 2.0
+		var h: float = size.y - pad_y * 2.0
+		var pts: Array[Vector2] = []
+		var n: int = values.size()
+		for i in range(n):
+			var x: float = pad_x + (w * float(i) / float(maxi(1, n - 1))) if n > 1 else pad_x + w * 0.5
+			var y: float = pad_y + h - ((float(values[i]) - min_v) / span) * h
+			pts.append(Vector2(x, y))
+		var line_col := Color(0.32, 0.88, 0.45)
+		if n >= 2 and float(values[n - 1]) < float(values[n - 2]):
+			line_col = Color(0.95, 0.35, 0.35)
+		for i in range(pts.size() - 1):
+			draw_line(pts[i], pts[i + 1], line_col, 2.2)
+		for pt in pts:
+			draw_circle(pt, 3.5, line_col)
+
+func _setup_stats_modal() -> void:
+	var top_hbox := get_node_or_null("TopPanel/HBox") as HBoxContainer
+	if top_hbox and btn_townhall:
+		var btn_st := Button.new()
+		btn_st.name = "BtnStats"
+		btn_st.text = "Stat"
+		btn_st.custom_minimum_size = Vector2(48, 30)
+		btn_st.add_theme_font_size_override("font_size", 12)
+		UIThemeHelper.apply_btn_secondary(btn_st, 30.0)
+		btn_st.pressed.connect(_open_stats_modal)
+		top_hbox.add_child(btn_st)
+		top_hbox.move_child(btn_st, btn_townhall.get_index())
+
+	stats_backdrop = ColorRect.new()
+	stats_backdrop.visible = false
+	stats_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	stats_backdrop.color = Color(0.0, 0.0, 0.0, 0.45)
+	stats_backdrop.gui_input.connect(func(ev: InputEvent):
+		if ev is InputEventMouseButton and ev.pressed:
+			_close_stats_modal()
+	)
+	add_child(stats_backdrop)
+
+	stats_modal = PanelContainer.new()
+	stats_modal.visible = false
+	stats_modal.set_anchors_preset(Control.PRESET_CENTER)
+	stats_modal.offset_left = -280.0
+	stats_modal.offset_top = -230.0
+	stats_modal.offset_right = 280.0
+	stats_modal.offset_bottom = 230.0
+	stats_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 16, 16.0, 14.0, 0.96))
+	add_child(stats_modal)
+
+	var wrap := VBoxContainer.new()
+	wrap.add_theme_constant_override("separation", 8)
+	stats_modal.add_child(wrap)
+
+	var hdr := HBoxContainer.new()
+	var ttl := Label.new()
+	ttl.text = "Statistik Kota (12 Bulan Terakhir)"
+	ttl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ttl.add_theme_font_size_override("font_size", 17)
+	ttl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.28))
+	hdr.add_child(ttl)
+	var btn_x := Button.new()
+	btn_x.text = "X"
+	btn_x.custom_minimum_size = Vector2(36, 30)
+	UIThemeHelper.apply_btn_secondary(btn_x, 30.0)
+	btn_x.pressed.connect(_close_stats_modal)
+	hdr.add_child(btn_x)
+	wrap.add_child(hdr)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(510, 360)
+	wrap.add_child(scroll)
+
+	stats_vbox = VBoxContainer.new()
+	stats_vbox.add_theme_constant_override("separation", 8)
+	scroll.add_child(stats_vbox)
+
+func _close_stats_modal() -> void:
+	if stats_modal:
+		stats_modal.visible = false
+	if stats_backdrop:
+		stats_backdrop.visible = false
+
+func _open_stats_modal() -> void:
+	if not stats_modal or not stats_vbox or not city_manager or not city_manager.city_data:
+		return
+	for ch in stats_vbox.get_children():
+		stats_vbox.remove_child(ch)
+		ch.queue_free()
+	var d := city_manager.city_data
+	var hist: Array = d.riwayat_statistik
+	var metrics := [
+		{"key": "pop", "title": "Populasi", "cur": d.population, "suffix": ""},
+		{"key": "money", "title": "Uang Kota", "cur": d.money, "suffix": " Rp"},
+		{"key": "happy", "title": "Kebahagiaan", "cur": int(round(d.happiness)), "suffix": "%"},
+		{"key": "popu", "title": "Popularitas", "cur": int(round(d.popularity)), "suffix": "%"},
+		{"key": "sec", "title": "Keamanan", "cur": int(round(d.security)), "suffix": "%"}
 	]
-	for bsp in buy_specs:
-		var bb := Button.new()
-		bb.name = bsp["name"]
-		bb.text = bsp["text"]
-		bb.custom_minimum_size = Vector2(78, 44)
-		bb.add_theme_font_size_override("font_size", 10)
-		UIThemeHelper.apply_btn_secondary(bb, 44.0)
-		bb.pressed.connect(bsp["fn"])
-		hbox.add_child(bb)
+	for mt in metrics:
+		var arr: Array = []
+		for row in hist:
+			arr.append(row.get(mt["key"], 0))
+		var chart := StatsLineChart.new(arr)
+		stats_vbox.add_child(chart)
+		var delta_txt := ""
+		if arr.size() >= 2:
+			var diff: int = int(arr[arr.size() - 1]) - int(arr[arr.size() - 2])
+			delta_txt = " (%s%s dari bulan lalu)" % ["+" if diff >= 0 else "", _format_number(diff) if mt["key"] == "money" else str(diff)]
+		var cur_str := ("Rp %s" % _format_number(int(mt["cur"]))) if mt["key"] == "money" else ("%d%s" % [int(mt["cur"]), mt["suffix"]])
+		var lbl := Label.new()
+		lbl.text = "%s: %s%s" % [mt["title"], cur_str, delta_txt]
+		lbl.add_theme_font_size_override("font_size", 12)
+		stats_vbox.add_child(lbl)
+
+	var sum_lbl := Label.new()
+	sum_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sum_lbl.add_theme_font_size_override("font_size", 12)
+	var sum_txt := "Ringkasan 3 Bulan Terakhir:"
+	var start_i := maxi(0, hist.size() - 3)
+	for i in range(hist.size() - 1, start_i - 1, -1):
+		var r: Dictionary = hist[i]
+		sum_txt += "\nBln %d Th %d: Pop %d, Uang Rp %s, Senang %d%%, Populer %d%%, Aman %d%%" % [
+			int(r.get("month", 1)), int(r.get("year", 1)), int(r.get("pop", 0)),
+			_format_number(int(r.get("money", 0))), int(r.get("happy", 0)), int(r.get("popu", 0)), int(r.get("sec", 0))
+		]
+	if hist.is_empty():
+		sum_txt += "\nBelum ada ringkasan bulanan."
+	sum_lbl.text = sum_txt
+	stats_vbox.add_child(sum_lbl)
+	stats_backdrop.visible = true
+	stats_modal.visible = true
+
+func _setup_photo_mode() -> void:
+	var top_hbox := get_node_or_null("TopPanel/HBox") as HBoxContainer
+	var btn_ph := Button.new()
+	if top_hbox and btn_townhall:
+		var btn_cam := Button.new()
+		btn_cam.name = "BtnCamMode"
+		var cur_cm: String = city_manager.camera_controller.camera_mode if (city_manager and city_manager.camera_controller) else "theotown"
+		btn_cam.text = "Kam: Bebas" if cur_cm == "bebas" else "Kam: TheoTown"
+		btn_cam.custom_minimum_size = Vector2(88, 30)
+		btn_cam.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(btn_cam, 30.0)
+		btn_cam.pressed.connect(func():
+			if city_manager and city_manager.camera_controller:
+				var next_m := "bebas" if city_manager.camera_controller.camera_mode == "theotown" else "theotown"
+				city_manager.camera_controller.set_camera_mode(next_m)
+				btn_cam.text = "Kam: Bebas" if next_m == "bebas" else "Kam: TheoTown"
+		)
+		top_hbox.add_child(btn_cam)
+		top_hbox.move_child(btn_cam, btn_townhall.get_index())
+
+		btn_ph.name = "BtnPhotoMode"
+		btn_ph.text = "Foto"
+		btn_ph.custom_minimum_size = Vector2(48, 30)
+		btn_ph.add_theme_font_size_override("font_size", 12)
+		UIThemeHelper.apply_btn_secondary(btn_ph, 30.0)
+		btn_ph.pressed.connect(func():
+			if photo_helper:
+				photo_helper.enter_photo_mode()
+		)
+		top_hbox.add_child(btn_ph)
+		top_hbox.move_child(btn_ph, btn_townhall.get_index())
+
+	var hide_list: Array = []
+	for p_name in ["TopPanel", "RightPanel", "TimeSpeedPanel", "TaxPanel", "FarmPanel", "BottomPalette", "MissionPanel", "BubbleOverlay", "CategoryPopup", "TouchControls"]:
+		var nd: Node = get_node_or_null(p_name)
+		if nd:
+			hide_list.append(nd)
+
+	photo_helper = PhotoModeHelper.new()
+	add_child(photo_helper)
+	photo_helper.setup(hide_list, func() -> Dictionary:
+		if not city_manager or not city_manager.city_data:
+			return {}
+		var d := city_manager.city_data
+		return {
+			"tier": d.city_level,
+			"pop": d.population,
+			"date": "Bln %d Th %d" % [d.month, d.year]
+		}
+	)
+	photo_helper.photo_mode_toggled.connect(func(is_on: bool):
+		if city_manager and city_manager.city_data:
+			if is_on:
+				_prev_speed_before_photo = city_manager.city_data.game_speed
+				city_manager.set_game_speed(0.0)
+			else:
+				city_manager.set_game_speed(_prev_speed_before_photo)
+	)
+	photo_helper.rotate_camera_requested.connect(func():
+		if city_manager and city_manager.camera_controller:
+			city_manager.camera_controller.rotation.y += PI * 0.25
+	)
 
 func _format_number(val: int) -> String:
 	var s := str(val)

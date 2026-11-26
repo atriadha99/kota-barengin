@@ -120,14 +120,15 @@ static func save_season2(data: CityData) -> bool:
 				cfg.set_value("tiles", key, [
 					t_type,
 					t.get("level", 0),
-					t.get("zone", CityData.BuildingZone.RESIDENTIAL)
+					t.get("zone", CityData.BuildingZone.RESIDENTIAL),
+					t.get("rotation", 0)
 				])
 	# Simpan tile di wilayah perluasan
 	var extra_arr: Array = []
 	for k in data.extra_tiles.keys():
 		var tv: Dictionary = data.extra_tiles[k]
 		if tv.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY:
-			extra_arr.append([k.x, k.y, tv.get("type", 0), tv.get("level", 0), tv.get("zone", 0)])
+			extra_arr.append([k.x, k.y, tv.get("type", 0), tv.get("level", 0), tv.get("zone", 0), tv.get("rotation", 0)])
 	cfg.set_value("tiles", "extra_tiles", extra_arr)
 	cfg.set_value("tiles", "power_cables", data.power_cables.keys())
 	cfg.set_value("tiles", "water_pipes", data.water_pipes.keys())
@@ -146,6 +147,15 @@ static func save_season2(data: CityData) -> bool:
 	cfg.set_value("city", "airport", {
 		"airplanes": data.airplane_count
 	})
+	cfg.set_value("city", "waktu_jam", data.waktu_jam)
+	cfg.set_value("city", "cuaca_saat_ini", data.cuaca_saat_ini)
+	cfg.set_value("city", "event_aktif", data.event_aktif.duplicate(true))
+	cfg.set_value("city", "event_cooldown", data.event_cooldown)
+	cfg.set_value("city", "last_event_id", data.last_event_id)
+	cfg.set_value("city", "flood_cooldown", data.flood_cooldown)
+	cfg.set_value("city", "riwayat_event", data.riwayat_event.duplicate(true))
+	cfg.set_value("city", "keinginan_warga", data.keinginan_warga.duplicate(true))
+	cfg.set_value("city", "riwayat_statistik", data.riwayat_statistik.duplicate(true))
 
 	var err := cfg.save(SAVE_SEASON2_PATH)
 	return err == OK
@@ -246,12 +256,14 @@ static func load_season2(data: CityData) -> bool:
 			if cfg.has_section_key("tiles", key):
 				var arr = cfg.get_value("tiles", key, null)
 				if arr is Array and arr.size() >= 3:
-					data.set_tile(x, y, int(arr[0]), int(arr[1]), int(arr[2]))
+					var rot: int = int(arr[3]) if arr.size() >= 4 else 0
+					data.set_tile(x, y, int(arr[0]), int(arr[1]), int(arr[2]), rot)
 	var extra_loaded = cfg.get_value("tiles", "extra_tiles", [])
 	if extra_loaded is Array:
 		for item in extra_loaded:
 			if item is Array and item.size() >= 5:
-				data.set_tile(int(item[0]), int(item[1]), int(item[2]), int(item[3]), int(item[4]))
+				var rot: int = int(item[5]) if item.size() >= 6 else 0
+				data.set_tile(int(item[0]), int(item[1]), int(item[2]), int(item[3]), int(item[4]), rot)
 
 	# Muat kabel & pipa (save lama tanpa key dianggap tersambung otomatis)
 	if cfg.has_section_key("tiles", "power_cables"):
@@ -285,10 +297,10 @@ static func load_season2(data: CityData) -> bool:
 	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
 	var af2 = cfg.get_value("city", "active_fire", {})
 	data.active_fire = af2.duplicate(true) if af2 is Dictionary else {}
-	var tr = cfg.get_value("city", "transport", {})
-	if tr is Dictionary:
-		data.bus_kopaja_count = int(tr.get("bus_kopaja", 0))
-		data.busway_count = int(tr.get("busway", 0))
+	var tr_data = cfg.get_value("city", "transport", {})
+	if tr_data is Dictionary:
+		data.bus_kopaja_count = int(tr_data.get("bus_kopaja", 0))
+		data.busway_count = int(tr_data.get("busway", 0))
 	var wr = cfg.get_value("city", "wide_roads", [])
 	if wr is Array:
 		for p in wr:
@@ -302,6 +314,20 @@ static func load_season2(data: CityData) -> bool:
 	var ap = cfg.get_value("city", "airport", {})
 	if ap is Dictionary:
 		data.airplane_count = int(ap.get("airplanes", 0))
+	data.waktu_jam = float(cfg.get_value("city", "waktu_jam", 12.0))
+	data.cuaca_saat_ini = str(cfg.get_value("city", "cuaca_saat_ini", "cerah"))
+	var ev_a = cfg.get_value("city", "event_aktif", {})
+	data.event_aktif = ev_a.duplicate(true) if ev_a is Dictionary else {}
+	data.event_cooldown = int(cfg.get_value("city", "event_cooldown", 2))
+	data.last_event_id = str(cfg.get_value("city", "last_event_id", ""))
+	data.flood_cooldown = int(cfg.get_value("city", "flood_cooldown", 0))
+	var ev_r = cfg.get_value("city", "riwayat_event", [])
+	data.riwayat_event = ev_r.duplicate(true) if ev_r is Array else []
+	var kw = cfg.get_value("city", "keinginan_warga", {})
+	data.keinginan_warga = kw.duplicate(true) if kw is Dictionary else {}
+	data.ensure_citizen_wishes()
+	var rs = cfg.get_value("city", "riwayat_statistik", [])
+	data.riwayat_statistik = rs.duplicate(true) if rs is Array else []
 
 	data.update_utilities()
 	data.city_level = CityData.get_city_tier(data.population)
@@ -318,6 +344,7 @@ static func save_settings(settings: Dictionary) -> void:
 	cfg.set_value("audio", "music_volume", float(settings.get("music_volume", 70.0)))
 	cfg.set_value("audio", "sfx_volume", float(settings.get("sfx_volume", 85.0)))
 	cfg.set_value("audio", "muted", bool(settings.get("muted", false)))
+	cfg.set_value("display", "camera_mode", str(settings.get("camera_mode", "theotown")))
 	cfg.save(SETTINGS_PATH)
 
 static func load_settings() -> Dictionary:
@@ -325,7 +352,8 @@ static func load_settings() -> Dictionary:
 		"master_volume": 80.0,
 		"music_volume": 70.0,
 		"sfx_volume": 85.0,
-		"muted": false
+		"muted": false,
+		"camera_mode": "theotown"
 	}
 	var cfg := ConfigFile.new()
 	if FileAccess.file_exists(SETTINGS_PATH) and cfg.load(SETTINGS_PATH) == OK:
@@ -333,4 +361,5 @@ static func load_settings() -> Dictionary:
 		result["music_volume"] = float(cfg.get_value("audio", "music_volume", 70.0))
 		result["sfx_volume"] = float(cfg.get_value("audio", "sfx_volume", 85.0))
 		result["muted"] = bool(cfg.get_value("audio", "muted", false))
+		result["camera_mode"] = str(cfg.get_value("display", "camera_mode", "theotown"))
 	return result

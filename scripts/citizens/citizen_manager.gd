@@ -51,6 +51,25 @@ func _create_citizens() -> void:
 
 		var body := BuildingBuilder.create_citizen_node(i)
 		w_node.add_child(body)
+		var umb := Node3D.new()
+		umb.name = "Umbrella"
+		umb.visible = false
+		var pole := MeshInstance3D.new()
+		var pm := BoxMesh.new()
+		pm.size = Vector3(0.03, 0.45, 0.03)
+		pole.mesh = pm
+		pole.position = Vector3(0.10, 0.85, 0.0)
+		umb.add_child(pole)
+		var cap := MeshInstance3D.new()
+		var cm := BoxMesh.new()
+		cm.size = Vector3(0.45, 0.08, 0.45)
+		var cmat := StandardMaterial3D.new()
+		cmat.albedo_color = Color(0.22, 0.58, 0.92) if i % 2 == 0 else Color(0.92, 0.35, 0.35)
+		cap.mesh = cm
+		cap.material_override = cmat
+		cap.position = Vector3(0.10, 1.08, 0.0)
+		umb.add_child(cap)
+		w_node.add_child(umb)
 		add_child(w_node)
 
 		var walker := WalkerNPC.new()
@@ -270,6 +289,12 @@ func trigger_fire_complaint(loc: String) -> void:
 	var w: WalkerNPC = walkers[walkers.size() - 1]
 	_set_complaint(w, ComplaintsData.COMPLAINT_FIRE, loc)
 
+func trigger_custom_complaint(c_type: String, loc: String) -> void:
+	if walkers.is_empty():
+		return
+	var w: WalkerNPC = walkers[randi() % walkers.size()]
+	_set_complaint(w, c_type, loc)
+
 func _set_complaint(walker: WalkerNPC, complaint_type: String, location: String) -> void:
 	if walker.active_complaint.get("type", "") == complaint_type:
 		return # Sudah aktif
@@ -338,3 +363,10 @@ func check_click_hit(world_hit: Vector3) -> bool:
 				citizen_selected.emit(walker.citizen_data, walker.active_complaint)
 				return true
 	return false
+
+func set_rain_umbrellas(raining: bool) -> void:
+	for walker in walkers:
+		if walker.node and is_instance_valid(walker.node):
+			var u: Node3D = walker.node.get_node_or_null("Umbrella") as Node3D
+			if u:
+				u.visible = raining

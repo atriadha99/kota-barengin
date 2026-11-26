@@ -146,6 +146,26 @@ var flyovers: Dictionary = {} # Vector2i -> true
 var bus_kopaja_count: int = 0
 var busway_count: int = 0
 var airplane_count: int = 0
+var waktu_jam: float = 12.0
+var cuaca_saat_ini: String = "cerah"
+var event_aktif: Dictionary = {}
+var event_cooldown: int = 2
+var last_event_id: String = ""
+var flood_cooldown: int = 0
+var riwayat_event: Array = []
+var keinginan_warga: Dictionary = {}
+var riwayat_statistik: Array = []
+
+const WISH_DEFS: Array = [
+	{"type": "taman", "text": "Pengen ada taman di dekat rumah"},
+	{"type": "pabrik", "text": "Pengen kerja di pabrik"},
+	{"type": "sekolah", "text": "Pengen ada sekolah buat anakku"},
+	{"type": "jalan", "text": "Pengen jalan di depan rumah diperbaiki"},
+	{"type": "angkutan", "text": "Pengen ada angkutan umum di dekat rumah"},
+	{"type": "aman", "text": "Pengen kotaku aman"},
+	{"type": "berobat", "text": "Pengen ada tempat berobat di dekat rumah"},
+	{"type": "pasar", "text": "Pengen ada pasar di dekat rumah"}
+]
 var city_level: String = "Desa"
 var game_speed: float = 1.0 # 0.0 (Pause), 1.0 (1x), 3.0 (3x)
 
@@ -284,6 +304,7 @@ func reset_grid() -> void:
 	bus_kopaja_count = 0
 	busway_count = 0
 	airplane_count = 0
+	riwayat_statistik.clear()
 	for y in range(GRID_SIZE):
 		var row: Array = []
 		for x in range(GRID_SIZE):
@@ -291,7 +312,8 @@ func reset_grid() -> void:
 				"type": TileType.EMPTY,
 				"level": 0,
 				"zone": BuildingZone.RESIDENTIAL,
-				"has_utility": true
+				"has_utility": true,
+				"rotation": 0
 			})
 		tiles.append(row)
 
@@ -301,14 +323,15 @@ func get_tile(x: int, y: int) -> Dictionary:
 	var k := Vector2i(x, y)
 	if extra_tiles.has(k):
 		return extra_tiles[k]
-	return { "type": TileType.EMPTY, "level": 0, "zone": BuildingZone.RESIDENTIAL, "has_utility": true }
+	return { "type": TileType.EMPTY, "level": 0, "zone": BuildingZone.RESIDENTIAL, "has_utility": true, "rotation": 0 }
 
-func set_tile(x: int, y: int, type: TileType, level: int = 0, zone: BuildingZone = BuildingZone.RESIDENTIAL) -> void:
+func set_tile(x: int, y: int, type: TileType, level: int = 0, zone: BuildingZone = BuildingZone.RESIDENTIAL, rotation: int = 0) -> void:
 	var d := {
 		"type": type,
 		"level": level,
 		"zone": zone,
-		"has_utility": true
+		"has_utility": true,
+		"rotation": ((rotation % 360) + 360) % 360
 	}
 	if x >= 0 and x < GRID_SIZE and y >= 0 and y < GRID_SIZE:
 		tiles[y][x] = d
@@ -509,11 +532,10 @@ func can_supply_new_building(zone_type: int) -> bool:
 func has_nearby_park(cx: int, cy: int, max_dist: int = 3) -> bool:
 	for dy in range(-max_dist, max_dist + 1):
 		for dx in range(-max_dist, max_dist + 1):
-			var nx := cx + dx
-			var ny := cy + dy
-			if is_valid_tile(nx, ny):
-				if tiles[ny][nx].get("type", TileType.EMPTY) == TileType.PARK:
-					return true
+			var nx: int = cx + dx
+			var ny: int = cy + dy
+			if is_valid_tile(nx, ny) and get_tile(nx, ny).get("type", TileType.EMPTY) == TileType.PARK:
+				return true
 	return false
 
 ## Hitung tingkat kebahagiaan kota (0 - 100)
@@ -613,6 +635,15 @@ func calculate_happiness() -> float:
 	if not runways.is_empty() and _any_house_in_radius(runways, 5):
 		base -= 3.0
 
+	# 7. Pengaruh Event Aktif
+	var ev_id: String = str(event_aktif.get("id", ""))
+	if ev_id in ["kuliner", "pasar_malam"]:
+		base += 5.0
+	elif ev_id == "17an":
+		base += 3.0
+	elif ev_id == "banjir":
+		base -= 3.0
+
 	return clampf(base, 0.0, 100.0)
 
 func get_public_positions(target_type: int) -> Array[Vector2i]:
@@ -684,6 +715,55 @@ func get_working_public_positions(target_type: int) -> Array[Vector2i]:
 		if t.get("type", TileType.EMPTY) == target_type and t.get("has_utility", true):
 			res.append(p)
 	return res
+
+func ensure_citizen_wishes() -> void:
+	for c in citizens_data:
+		var cid: String = str(c.get("id", ""))
+		if not cid.is_empty() and not keinginan_warga.has(cid):
+			assign_new_wish(cid)
+
+func assign_new_wish(cid: String) -> void:
+	var w: Dictionary = WISH_DEFS[randi() % WISH_DEFS.size()]
+	keinginan_warga[cid] = {
+		"type": w["type"],
+		"text": w["text"],
+		"fulfilled": false,
+		"months": 0,
+		"cooldown": 0
+	}
+
+func is_wish_fulfilled(w_type: String) -> bool:
+	match w_type:
+		"taman":
+			return count_public_type(TileType.PARK) >= 1
+		"pabrik":
+			return count_public_type(TileType.ZONE_I) >= 1
+		"sekolah":
+			return has_working_public(TileType.SCHOOL)
+		"jalan":
+			return not wide_roads.is_empty() or not flyovers.is_empty()
+		"angkutan":
+			return count_public_type(TileType.STOP_ANGKOT) >= 1 or count_public_type(TileType.STOP_BUS) >= 1 or has_working_public(TileType.TRAIN_STATION)
+		"aman":
+			return security >= 70.0
+		"berobat":
+			return has_working_public(TileType.CLINIC) or has_working_public(TileType.HOSPITAL)
+		"pasar":
+			return count_public_type(TileType.ZONE_C) >= 1
+	return false
+
+func record_monthly_stats() -> void:
+	riwayat_statistik.append({
+		"month": month,
+		"year": year,
+		"pop": population,
+		"money": money,
+		"happy": int(round(happiness)),
+		"popu": int(round(popularity)),
+		"sec": int(round(security))
+	})
+	if riwayat_statistik.size() > 12:
+		riwayat_statistik.remove_at(0)
 
 func has_working_public(target_type: int) -> bool:
 	return not get_working_public_positions(target_type).is_empty()

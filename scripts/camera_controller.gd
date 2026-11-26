@@ -17,6 +17,7 @@ var yaw: float = 45.0
 var pitch: float = 45.0
 var zoom_distance: float = 22.0
 var focus_position: Vector3 = Vector3(16.0, 0.0, 16.0)
+var camera_mode: String = "theotown" # "theotown" | "bebas"
 
 var is_orbiting: bool = false
 var is_panning: bool = false
@@ -32,10 +33,25 @@ const LONG_PRESS_DURATION: float = 0.55
 @onready var camera: Camera3D = $Camera3D
 
 func rotate_yaw(delta_deg: float) -> void:
+	if camera_mode == "theotown":
+		return
 	yaw = fposmod(yaw + delta_deg, 360.0)
 	_update_transform()
 
+func set_camera_mode(mode: String, save_pref: bool = true) -> void:
+	camera_mode = "bebas" if mode == "bebas" else "theotown"
+	if camera_mode == "theotown":
+		yaw = 45.0
+		pitch = 45.0
+	_update_transform()
+	if save_pref:
+		var s := SaveManager.load_settings()
+		s["camera_mode"] = camera_mode
+		SaveManager.save_settings(s)
+
 func _ready() -> void:
+	var s := SaveManager.load_settings()
+	set_camera_mode(str(s.get("camera_mode", "theotown")), false)
 	_clamp_focus()
 	_update_transform()
 
@@ -161,7 +177,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mm := event as InputEventMouseMotion
 		if mm.device == InputEvent.DEVICE_ID_EMULATION:
 			return
-		if is_orbiting:
+		if is_orbiting and camera_mode == "bebas":
 			yaw -= mm.relative.x * orbit_sensitivity
 			yaw = fposmod(yaw, 360.0)
 			pitch = clampf(pitch - mm.relative.y * orbit_sensitivity, min_pitch, max_pitch)

@@ -77,6 +77,15 @@ var lbl_gov_title: Label = null
 var lbl_gov_info: Label = null
 var gov_actions_vbox: VBoxContainer = null
 var gov_complaints_vbox: VBoxContainer = null
+var weather_helper: WeatherCycleHelper = null
+var s1_waktu_jam: float = 12.0
+var s1_cuaca: String = "cerah"
+var lbl_s1_clock: Label = null
+var s1_weather_icon: S1VisualBuilder.StatIcon = null
+var _s1_weather_accum: float = 0.0
+var s1_photo_helper: PhotoModeHelper = null
+var s1_photo_paused: bool = false
+var s1_ambient: AmbientLifeHelper = null
 
 func _ready() -> void:
 	_build_ui()
@@ -89,8 +98,34 @@ func _ready() -> void:
 			_refresh_hud()
 	_rebuild_world()
 	_update_camera(Vector2.ZERO)
+	weather_helper = WeatherCycleHelper.new()
+	add_child(weather_helper)
+	var w_env := find_child("WorldEnvironment", true, false) as WorldEnvironment
+	var d_light := find_child("DirectionalLight3D", true, false) as DirectionalLight3D
+	weather_helper.setup(w_env, d_light, s1_waktu_jam, s1_cuaca)
+	s1_ambient = AmbientLifeHelper.new()
+	add_child(s1_ambient)
+	s1_ambient.setup(false)
 
 func _process(delta: float) -> void:
+	if s1_photo_paused:
+		return
+	if s1_ambient:
+		s1_ambient.tick(delta, {}, {})
+	if weather_helper and hud_root and hud_root.visible:
+		weather_helper.tick(delta, 1.0, Vector3.ZERO)
+		s1_waktu_jam = weather_helper.waktu_jam
+		s1_cuaca = weather_helper.cuaca_saat_ini
+		_s1_weather_accum += delta
+		if _s1_weather_accum >= 0.5:
+			_s1_weather_accum = 0.0
+			if lbl_s1_clock:
+				lbl_s1_clock.text = "%02d:00" % int(s1_waktu_jam)
+			if s1_weather_icon:
+				var ic := "sun" if s1_cuaca == "cerah" else ("cloud" if s1_cuaca == "berawan" else "rain")
+				if s1_weather_icon.icon_type != ic:
+					s1_weather_icon.icon_type = ic
+					s1_weather_icon.queue_redraw()
 	var move := Vector2.ZERO
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		move.x -= 1.0
@@ -563,15 +598,15 @@ func _build_ui() -> void:
 	# Top Bar 5 Stat + Anggaran
 	var top_bar := PanelContainer.new()
 	top_bar.anchor_right = 1.0
-	top_bar.offset_left = 12.0
+	top_bar.offset_left = 8.0
 	top_bar.offset_top = 10.0
-	top_bar.offset_right = -12.0
-	top_bar.offset_bottom = 56.0
-	top_bar.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 12, 10.0, 6.0, 0.90))
+	top_bar.offset_right = -8.0
+	top_bar.offset_bottom = 54.0
+	top_bar.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 12, 8.0, 5.0, 0.90))
 	hud_root.add_child(top_bar)
 
 	var top_hbox := HBoxContainer.new()
-	top_hbox.add_theme_constant_override("separation", 8)
+	top_hbox.add_theme_constant_override("separation", 4)
 	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	top_bar.add_child(top_hbox)
 
@@ -597,6 +632,58 @@ func _build_ui() -> void:
 	lbl_val_senang = _add_stat_chip(top_hbox, chip_style, "happy", Color(0.95, 0.96, 0.98))
 	lbl_val_pop = _add_stat_chip(top_hbox, chip_style, "pop", Color(0.95, 0.96, 0.98))
 	lbl_val_integ = _add_stat_chip(top_hbox, chip_style, "integ", Color(0.95, 0.96, 0.98))
+
+	var w_chip := PanelContainer.new()
+	w_chip.add_theme_stylebox_override("panel", chip_style)
+	var wh := HBoxContainer.new()
+	wh.add_theme_constant_override("separation", 4)
+	w_chip.add_child(wh)
+	s1_weather_icon = S1VisualBuilder.StatIcon.new("sun")
+	wh.add_child(s1_weather_icon)
+	lbl_s1_clock = Label.new()
+	lbl_s1_clock.text = "12:00"
+	lbl_s1_clock.add_theme_font_size_override("font_size", 13)
+	wh.add_child(lbl_s1_clock)
+	top_hbox.add_child(w_chip)
+
+	var btn_s1_cam := Button.new()
+	var s1_cm: String = str(SaveManager.load_settings().get("camera_mode", "theotown"))
+	btn_s1_cam.text = "Kam: Bebas" if s1_cm == "bebas" else "Kam: TheoTown"
+	btn_s1_cam.custom_minimum_size = Vector2(88, 32)
+	UIThemeHelper.apply_btn_secondary(btn_s1_cam, 32.0)
+	btn_s1_cam.add_theme_font_size_override("font_size", 11)
+	btn_s1_cam.pressed.connect(func():
+		var s := SaveManager.load_settings()
+		var next_m := "bebas" if str(s.get("camera_mode", "theotown")) == "theotown" else "theotown"
+		s["camera_mode"] = next_m
+		SaveManager.save_settings(s)
+		btn_s1_cam.text = "Kam: Bebas" if next_m == "bebas" else "Kam: TheoTown"
+	)
+	top_hbox.add_child(btn_s1_cam)
+
+	var btn_s1_photo := Button.new()
+	btn_s1_photo.text = "Foto"
+	btn_s1_photo.custom_minimum_size = Vector2(54, 32)
+	UIThemeHelper.apply_btn_secondary(btn_s1_photo, 32.0)
+	btn_s1_photo.add_theme_font_size_override("font_size", 12)
+	btn_s1_photo.pressed.connect(func():
+		if s1_photo_helper:
+			s1_photo_helper.enter_photo_mode()
+	)
+	top_hbox.add_child(btn_s1_photo)
+
+	s1_photo_helper = PhotoModeHelper.new()
+	ui_layer.add_child(s1_photo_helper)
+	s1_photo_helper.setup([hud_root], func() -> Dictionary:
+		return {
+			"tier": jabatan,
+			"pop": 1,
+			"date": "Bulan %d" % bulan
+		}
+	)
+	s1_photo_helper.photo_mode_toggled.connect(func(is_on: bool):
+		s1_photo_paused = is_on
+	)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1407,6 +1494,8 @@ func _save_s1() -> void:
 	cfg.set_value("warga", "ronda_months", ronda_months)
 	cfg.set_value("warga", "clean_months", clean_months)
 	cfg.set_value("warga", "active_complaints", active_complaints.duplicate(true))
+	cfg.set_value("warga", "waktu_jam", s1_waktu_jam)
+	cfg.set_value("warga", "cuaca_saat_ini", s1_cuaca)
 	cfg.save(SAVE_S1_PATH)
 
 func _load_s1() -> bool:
@@ -1448,6 +1537,8 @@ func _load_s1() -> bool:
 	clean_months = int(cfg.get_value("warga", "clean_months", 0))
 	var comp_val = cfg.get_value("warga", "active_complaints", [])
 	active_complaints = comp_val.duplicate(true) if comp_val is Array else []
+	s1_waktu_jam = float(cfg.get_value("warga", "waktu_jam", 12.0))
+	s1_cuaca = str(cfg.get_value("warga", "cuaca_saat_ini", "cerah"))
 	return true
 
 func _build_pause_and_settings_s1() -> void:

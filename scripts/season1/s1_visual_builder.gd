@@ -388,3 +388,15 @@ class StatIcon extends Control:
 					Vector2(9, 16.5), Vector2(3.5, 11.5), Vector2(2.5, 4.0)
 				])
 				draw_colored_polygon(sh, Color(0.28, 0.68, 0.96))
+			"sun":
+				draw_circle(c, 5.2, Color(1.0, 0.85, 0.22))
+			"cloud":
+				draw_circle(Vector2(6.5, 10.5), 4.0, Color(0.82, 0.86, 0.92))
+				draw_circle(Vector2(10.5, 9.5), 4.5, Color(0.86, 0.90, 0.95))
+				draw_circle(Vector2(13.0, 11.0), 3.2, Color(0.80, 0.84, 0.90))
+			"rain":
+				draw_circle(Vector2(7.0, 8.0), 3.8, Color(0.65, 0.72, 0.82))
+				draw_circle(Vector2(11.0, 7.5), 4.2, Color(0.70, 0.76, 0.86))
+				draw_line(Vector2(5.5, 12.5), Vector2(4.5, 16.0), Color(0.35, 0.75, 1.0), 1.8)
+				draw_line(Vector2(9.5, 12.5), Vector2(8.5, 16.0), Color(0.35, 0.75, 1.0), 1.8)
+				draw_line(Vector2(13.5, 12.5), Vector2(12.5, 16.0), Color(0.35, 0.75, 1.0), 1.8)
