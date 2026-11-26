@@ -19,6 +19,13 @@ func setup(p_city_data: CityData, p_car_controller: CarController, p_city_manage
 	car_controller = p_car_controller
 	city_manager = p_city_manager
 
+func restore_from_save() -> void:
+	if not city_data:
+		return
+	_refresh_visuals()
+	if car_controller and "speed_multiplier" in car_controller:
+		car_controller.speed_multiplier = 0.5 if city_data.pak_slamet_status.get("state") == "active" else 1.0
+
 func on_month_passed() -> void:
 	if not city_data:
 		return

@@ -47,6 +47,10 @@ const REVENUE_OFFICIAL_PARKING_MONTHLY: int = 5000
 const WHEAT_PER_HARVEST: int = 10
 var wheat_inventory: int = 0
 var wheat_price: int = 1200 # Acak Rp 800 - Rp 1.500 / unit
+var wheat_harvest_count: int = 0
+
+# Pelacakan misi yang sudah diklaim (Langkah 6)
+var missions_claimed: Dictionary = {}
 
 # Biaya perawatan / upkeep bulanan (Rp/bulan)
 const UPKEEP_POWER_PLANT: int = 2000

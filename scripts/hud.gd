@@ -78,6 +78,12 @@ const MAX_BUBBLES: int = 3
 var bubble_layer: Control = null
 var bubble_slots: Array = [] # [{ "panel": PanelContainer, "label": Label, "data": Dictionary }]
 
+# Panel Misi, Pause Menu, dan Settings (Langkah 6)
+var mission_vbox: VBoxContainer = null
+var pause_modal: PanelContainer = null
+var settings_modal: PanelContainer = null
+var _prev_speed_before_pause: float = 1.0
+
 func _ready() -> void:
 	if city_manager:
 		city_manager.city_updated.connect(_on_city_updated)
@@ -229,8 +235,13 @@ func _ready() -> void:
 	toast_label.visible = false
 
 	_setup_bubble_overlay()
+	_setup_menu_button()
+	_setup_mission_panel()
+	_setup_pause_and_settings()
 	_select_tool(CityManager.ToolMode.ROAD)
 	_select_speed(1.0)
+	if city_manager and city_manager.city_data:
+		_on_city_updated(city_manager.city_data)
 
 func _select_tool(mode: CityManager.ToolMode) -> void:
 	if city_manager:
@@ -301,6 +312,13 @@ func _on_city_updated(data: CityData) -> void:
 
 	label_wheat.text = "Gandum: %d unit" % data.wheat_inventory
 	label_price.text = "Harga: Rp %s / unit" % _format_number(data.wheat_price)
+
+	var tax_pct: int = int(round(data.tax_rate * 100.0))
+	if int(round(tax_slider.value)) != tax_pct:
+		tax_slider.set_value_no_signal(float(tax_pct))
+	label_tax.text = "Pajak: %d%%" % tax_pct
+
+	_refresh_missions()
 
 	# Update jumlah pengaduan di tombol Balai Kota
 	var complaint_count := data.active_complaints.size()
@@ -576,7 +594,9 @@ func _update_screen_bubbles() -> void:
 	var modal_open: bool = (
 		(pak_slamet_modal and pak_slamet_modal.visible) or
 		(townhall_modal and townhall_modal.visible) or
-		(citizen_modal and citizen_modal.visible)
+		(citizen_modal and citizen_modal.visible) or
+		(pause_modal and pause_modal.visible) or
+		(settings_modal and settings_modal.visible)
 	)
 	if modal_open or not city_manager or not city_manager.city_data:
 		for slot in bubble_slots:
@@ -674,3 +694,269 @@ func _update_screen_bubbles() -> void:
 		panel.visible = true
 		slot["data"] = entry
 		placed_rects.append(Rect2(pos, p_size))
+
+func _make_dark_stylebox(alpha: float = 0.88, radius: int = 8, margin_h: float = 12.0, margin_v: float = 10.0) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.10, 0.12, 0.18, alpha)
+	sb.border_width_left = 1
+	sb.border_width_top = 1
+	sb.border_width_right = 1
+	sb.border_width_bottom = 1
+	sb.border_color = Color(0.28, 0.35, 0.50, 0.9)
+	sb.corner_radius_top_left = radius
+	sb.corner_radius_top_right = radius
+	sb.corner_radius_bottom_right = radius
+	sb.corner_radius_bottom_left = radius
+	sb.content_margin_left = margin_h
+	sb.content_margin_top = margin_v
+	sb.content_margin_right = margin_h
+	sb.content_margin_bottom = margin_v
+	return sb
+
+func _setup_menu_button() -> void:
+	var top_hbox: HBoxContainer = get_node_or_null("TopPanel/HBox") as HBoxContainer
+	if not top_hbox:
+		return
+	var btn_menu := Button.new()
+	btn_menu.name = "BtnPauseMenu"
+	btn_menu.text = "☰ Menu"
+	btn_menu.custom_minimum_size = Vector2(76, 28)
+	btn_menu.add_theme_font_size_override("font_size", 13)
+	btn_menu.pressed.connect(_toggle_pause_menu)
+	top_hbox.add_child(btn_menu)
+
+func _setup_mission_panel() -> void:
+	var panel := PanelContainer.new()
+	panel.name = "MissionPanel"
+	panel.anchor_left = 1.0
+	panel.anchor_right = 1.0
+	panel.offset_left = -262.0
+	panel.offset_top = 186.0
+	panel.offset_right = -12.0
+	panel.offset_bottom = 395.0
+	panel.add_theme_stylebox_override("panel", _make_dark_stylebox(0.86, 8, 10.0, 8.0))
+	add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.text = "Misi Kota"
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	vbox.add_child(title)
+
+	mission_vbox = VBoxContainer.new()
+	mission_vbox.add_theme_constant_override("separation", 4)
+	vbox.add_child(mission_vbox)
+
+func _refresh_missions() -> void:
+	if not mission_vbox or not city_manager:
+		return
+
+	for child in mission_vbox.get_children():
+		child.queue_free()
+
+	for m in city_manager.get_missions_status():
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+
+		var lbl := Label.new()
+		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+		var reward_str: String = "Rp %s" % _format_number(m["reward"])
+		if m["claimed"]:
+			lbl.text = "✓ %s (Diklaim)" % m["title"]
+			lbl.add_theme_color_override("font_color", Color(0.55, 0.85, 0.55))
+			row.add_child(lbl)
+		elif m["completed"]:
+			lbl.text = "✓ %s" % m["title"]
+			lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.35))
+			row.add_child(lbl)
+
+			var btn_claim := Button.new()
+			btn_claim.text = "Klaim +%s" % reward_str
+			btn_claim.add_theme_font_size_override("font_size", 11)
+			btn_claim.custom_minimum_size = Vector2(0, 22)
+			var mid: String = m["id"]
+			btn_claim.pressed.connect(func():
+				if city_manager:
+					city_manager.claim_mission(mid)
+			)
+			row.add_child(btn_claim)
+		else:
+			lbl.text = "○ %s (+%s)" % [m["title"], reward_str]
+			lbl.add_theme_color_override("font_color", Color(0.85, 0.88, 0.92))
+			row.add_child(lbl)
+
+		mission_vbox.add_child(row)
+
+func _setup_pause_and_settings() -> void:
+	# 1. Pause Modal
+	pause_modal = PanelContainer.new()
+	pause_modal.name = "PauseModal"
+	pause_modal.visible = false
+	pause_modal.set_anchors_preset(Control.PRESET_CENTER)
+	pause_modal.offset_left = -155.0
+	pause_modal.offset_top = -145.0
+	pause_modal.offset_right = 155.0
+	pause_modal.offset_bottom = 145.0
+	pause_modal.add_theme_stylebox_override("panel", _make_dark_stylebox(0.95, 12, 20.0, 18.0))
+	add_child(pause_modal)
+
+	var pvbox := VBoxContainer.new()
+	pvbox.add_theme_constant_override("separation", 10)
+	pause_modal.add_child(pvbox)
+
+	var ptitle := Label.new()
+	ptitle.text = "Permainan Dijeda"
+	ptitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ptitle.add_theme_font_size_override("font_size", 18)
+	ptitle.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	pvbox.add_child(ptitle)
+
+	var btn_resume := Button.new()
+	btn_resume.text = "Lanjut"
+	btn_resume.custom_minimum_size = Vector2(0, 36)
+	btn_resume.pressed.connect(_close_pause_menu)
+	pvbox.add_child(btn_resume)
+
+	var btn_settings := Button.new()
+	btn_settings.text = "Pengaturan"
+	btn_settings.custom_minimum_size = Vector2(0, 36)
+	btn_settings.pressed.connect(func():
+		pause_modal.visible = false
+		settings_modal.visible = true
+	)
+	pvbox.add_child(btn_settings)
+
+	var btn_save := Button.new()
+	btn_save.text = "Simpan"
+	btn_save.custom_minimum_size = Vector2(0, 36)
+	btn_save.pressed.connect(func():
+		if city_manager:
+			city_manager.save_game(true)
+	)
+	pvbox.add_child(btn_save)
+
+	var btn_exit_menu := Button.new()
+	btn_exit_menu.text = "Keluar ke Menu Utama"
+	btn_exit_menu.custom_minimum_size = Vector2(0, 36)
+	btn_exit_menu.pressed.connect(func():
+		if city_manager:
+			city_manager.save_game(false) # Autosave sebelum keluar
+		get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+	)
+	pvbox.add_child(btn_exit_menu)
+
+	# 2. Settings Modal (tombol & penyimpanan saja, audio di Langkah 7)
+	settings_modal = PanelContainer.new()
+	settings_modal.name = "SettingsModal"
+	settings_modal.visible = false
+	settings_modal.set_anchors_preset(Control.PRESET_CENTER)
+	settings_modal.offset_left = -180.0
+	settings_modal.offset_top = -155.0
+	settings_modal.offset_right = 180.0
+	settings_modal.offset_bottom = 155.0
+	settings_modal.add_theme_stylebox_override("panel", _make_dark_stylebox(0.96, 12, 20.0, 18.0))
+	add_child(settings_modal)
+
+	var svbox := VBoxContainer.new()
+	svbox.add_theme_constant_override("separation", 10)
+	settings_modal.add_child(svbox)
+
+	var stitle := Label.new()
+	stitle.text = "Pengaturan"
+	stitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stitle.add_theme_font_size_override("font_size", 18)
+	stitle.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	svbox.add_child(stitle)
+
+	var cur_settings: Dictionary = SaveManager.load_settings()
+
+	var lbl_master := Label.new()
+	lbl_master.text = "Volume Utama: %d%%" % int(cur_settings["master_volume"])
+	svbox.add_child(lbl_master)
+	var sl_master := HSlider.new()
+	sl_master.min_value = 0.0
+	sl_master.max_value = 100.0
+	sl_master.value = float(cur_settings["master_volume"])
+	sl_master.value_changed.connect(func(v: float): lbl_master.text = "Volume Utama: %d%%" % int(v))
+	svbox.add_child(sl_master)
+
+	var lbl_music := Label.new()
+	lbl_music.text = "Volume Musik: %d%%" % int(cur_settings["music_volume"])
+	svbox.add_child(lbl_music)
+	var sl_music := HSlider.new()
+	sl_music.min_value = 0.0
+	sl_music.max_value = 100.0
+	sl_music.value = float(cur_settings["music_volume"])
+	sl_music.value_changed.connect(func(v: float): lbl_music.text = "Volume Musik: %d%%" % int(v))
+	svbox.add_child(sl_music)
+
+	var lbl_sfx := Label.new()
+	lbl_sfx.text = "Volume SFX: %d%%" % int(cur_settings["sfx_volume"])
+	svbox.add_child(lbl_sfx)
+	var sl_sfx := HSlider.new()
+	sl_sfx.min_value = 0.0
+	sl_sfx.max_value = 100.0
+	sl_sfx.value = float(cur_settings["sfx_volume"])
+	sl_sfx.value_changed.connect(func(v: float): lbl_sfx.text = "Volume SFX: %d%%" % int(v))
+	svbox.add_child(sl_sfx)
+
+	var chk_mute := CheckButton.new()
+	chk_mute.text = "Senyapkan Semua (Mute)"
+	chk_mute.button_pressed = bool(cur_settings["muted"])
+	svbox.add_child(chk_mute)
+
+	var btn_save_settings := Button.new()
+	btn_save_settings.text = "Simpan & Kembali"
+	btn_save_settings.custom_minimum_size = Vector2(0, 34)
+	btn_save_settings.pressed.connect(func():
+		SaveManager.save_settings({
+			"master_volume": sl_master.value,
+			"music_volume": sl_music.value,
+			"sfx_volume": sl_sfx.value,
+			"muted": chk_mute.button_pressed
+		})
+		settings_modal.visible = false
+		pause_modal.visible = true
+		_show_toast("Pengaturan disimpan.")
+	)
+	svbox.add_child(btn_save_settings)
+
+func _toggle_pause_menu() -> void:
+	if not pause_modal:
+		return
+	if pause_modal.visible:
+		_close_pause_menu()
+	else:
+		if city_manager and city_manager.city_data and city_manager.city_data.game_speed > 0.0:
+			_prev_speed_before_pause = city_manager.city_data.game_speed
+			_select_speed(0.0)
+		pause_modal.visible = true
+
+func _close_pause_menu() -> void:
+	if pause_modal:
+		pause_modal.visible = false
+	if city_manager and city_manager.city_data and city_manager.city_data.game_speed == 0.0:
+		_select_speed(_prev_speed_before_pause if _prev_speed_before_pause > 0.0 else 1.0)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		if settings_modal and settings_modal.visible:
+			settings_modal.visible = false
+			if pause_modal:
+				pause_modal.visible = true
+		elif pak_slamet_modal and pak_slamet_modal.visible:
+			pak_slamet_modal.visible = false
+		elif townhall_modal and townhall_modal.visible:
+			townhall_modal.visible = false
+		elif citizen_modal and citizen_modal.visible:
+			citizen_modal.visible = false
+		else:
+			_toggle_pause_menu()
+		get_viewport().set_input_as_handled()

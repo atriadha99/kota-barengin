@@ -37,25 +37,33 @@ const MONTH_DURATION: float = 60.0
 
 func _ready() -> void:
 	city_data = CityData.new()
+	var loaded_from_save := false
+	if SaveManager.load_on_start:
+		loaded_from_save = SaveManager.load_season2(city_data)
+		SaveManager.load_on_start = false
 
 	if car_controller:
 		car_controller.setup(city_data)
 
 	if pak_slamet_manager:
 		pak_slamet_manager.setup(city_data, car_controller, self)
-		pak_slamet_manager.pak_slamet_event.connect(func(type: String, msg: String):
+		pak_slamet_manager.pak_slamet_event.connect(func(_type: String, msg: String):
 			show_toast.emit(msg)
 			city_updated.emit(city_data)
 		)
 		pak_slamet_manager.open_pak_slamet_dialog.connect(func():
 			open_pak_slamet_modal.emit()
 		)
+		if loaded_from_save:
+			pak_slamet_manager.restore_from_save()
 
 	if citizen_manager:
 		citizen_manager.setup(city_data)
 		citizen_manager.citizen_selected.connect(func(c_info: Dictionary, comp_info: Dictionary):
 			open_citizen_modal.emit(c_info, comp_info)
 		)
+		if loaded_from_save:
+			citizen_manager.restore_from_save()
 
 	if camera_controller:
 		camera_controller.tile_clicked.connect(_on_tile_clicked)
@@ -67,6 +75,8 @@ func _ready() -> void:
 
 	_refresh_all_visuals()
 	city_updated.emit(city_data)
+	if loaded_from_save:
+		show_toast.emit("Kota berhasil dimuat dari save!")
 
 func _process(delta: float) -> void:
 	if city_data.game_speed > 0.0:
@@ -218,6 +228,7 @@ func _apply_tool(x: int, y: int) -> void:
 
 func _harvest_farm(x: int, y: int) -> void:
 	city_data.wheat_inventory += CityData.WHEAT_PER_HARVEST
+	city_data.wheat_harvest_count += 1
 	city_data.set_tile(x, y, CityData.TileType.FARM, 1) # Kembali ke tahap Benih
 	_update_tile_visual(x, y)
 
@@ -401,6 +412,7 @@ func _advance_month() -> void:
 	_update_demand()
 	_check_city_tier()
 	_refresh_all_visuals()
+	SaveManager.save_season2(city_data) # Autosave tiap bulan game
 	city_updated.emit(city_data)
 
 func _check_city_tier() -> void:
@@ -526,3 +538,67 @@ func resolve_complaint(complaint_id: String, option_idx: int) -> void:
 	var label_action: String = "positif (+%d)" % pop_gain if pop_gain >= 0 else "negatif (%d)" % pop_gain
 	show_toast.emit("Pengaduan diselesaikan! Dampak Popularitas %s" % label_action)
 	city_updated.emit(city_data)
+
+## --- SISTEM MISI (Langkah 6: 6 misi, sekali klaim tiap misi) ---
+func get_missions_status() -> Array:
+	if not city_data:
+		return []
+
+	var house_count := 0
+	for y in range(CityData.GRID_SIZE):
+		for x in range(CityData.GRID_SIZE):
+			var t: Dictionary = city_data.get_tile(x, y)
+			var tp: int = t.get("type", CityData.TileType.EMPTY)
+			var lv: int = t.get("level", 0)
+			var zn: int = t.get("zone", CityData.BuildingZone.RESIDENTIAL)
+			if lv > 0 and (tp == CityData.TileType.ZONE_R or (tp == CityData.TileType.BUILDING and zn == CityData.BuildingZone.RESIDENTIAL)):
+				house_count += 1
+
+	var has_power_and_water: bool = (city_data.power_supply >= 100 and city_data.water_supply >= 100)
+	var is_kota_kecil: bool = (city_data.population >= 100 or city_data.city_level != "Desa")
+
+	var defs := [
+		{ "id": "pop_50", "title": "Capai 50 penduduk", "reward": 50000, "done": city_data.population >= 50 },
+		{ "id": "pop_100", "title": "Capai 100 penduduk", "reward": 100000, "done": city_data.population >= 100 },
+		{ "id": "houses_10", "title": "Bangun 10 rumah", "reward": 75000, "done": house_count >= 10 },
+		{ "id": "util_1", "title": "1 Pembangkit + 1 Menara Air", "reward": 50000, "done": has_power_and_water },
+		{ "id": "wheat_1", "title": "Panen gandum pertama", "reward": 25000, "done": city_data.wheat_harvest_count >= 1 },
+		{ "id": "tier_kc", "title": "Capai level Kota Kecil", "reward": 150000, "done": is_kota_kecil }
+	]
+
+	var result: Array = []
+	for d in defs:
+		var mid: String = d["id"]
+		result.append({
+			"id": mid,
+			"title": d["title"],
+			"reward": d["reward"],
+			"completed": d["done"],
+			"claimed": bool(city_data.missions_claimed.get(mid, false))
+		})
+	return result
+
+func claim_mission(mission_id: String) -> bool:
+	if not city_data:
+		return false
+	if city_data.missions_claimed.get(mission_id, false):
+		return false
+
+	for m in get_missions_status():
+		if m["id"] == mission_id and m["completed"]:
+			var reward: int = m["reward"]
+			city_data.missions_claimed[mission_id] = true
+			city_data.money += reward
+			SaveManager.save_season2(city_data)
+			show_toast.emit("Misi selesai! Hadiah +Rp %s" % _format_number(reward))
+			city_updated.emit(city_data)
+			return true
+	return false
+
+func save_game(is_manual: bool = false) -> bool:
+	if not city_data:
+		return false
+	var ok: bool = SaveManager.save_season2(city_data)
+	if ok and is_manual:
+		show_toast.emit("Permainan berhasil disimpan!")
+	return ok

@@ -28,6 +28,17 @@ func setup(p_city_data: CityData) -> void:
 	city_data = p_city_data
 	_create_citizens()
 
+func restore_from_save() -> void:
+	if not city_data:
+		return
+	for comp in city_data.active_complaints:
+		var cid: String = comp.get("citizen_id", "")
+		for walker in walkers:
+			if walker.citizen_data.get("id", "") == cid:
+				walker.active_complaint = comp.duplicate(true)
+				_show_bubble(walker, comp.get("quote", ""), false)
+				break
+
 func _create_citizens() -> void:
 	for child in get_children():
 		child.queue_free()
