@@ -717,7 +717,18 @@ func _setup_utility_buttons() -> void:
 		{"name": "BtnPolice", "label": "Polisi", "price_txt": "Rp100rb", "mode": CityManager.ToolMode.POLICE, "tile_type": CityData.TileType.POLICE, "cost": CityData.COST_POLICE},
 		{"name": "BtnMilitary", "label": "Markas TNI", "price_txt": "Rp200rb", "mode": CityManager.ToolMode.MILITARY, "tile_type": CityData.TileType.MILITARY, "cost": CityData.COST_MILITARY},
 		{"name": "BtnMayorOffice", "label": "Ktr Walikota", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.MAYOR_OFFICE, "tile_type": CityData.TileType.MAYOR_OFFICE, "cost": CityData.COST_MAYOR_OFFICE},
-		{"name": "BtnFireStation", "label": "Damkar", "price_txt": "Rp120rb", "mode": CityManager.ToolMode.FIRE_STATION, "tile_type": CityData.TileType.FIRE_STATION, "cost": CityData.COST_FIRE_STATION}
+		{"name": "BtnFireStation", "label": "Damkar", "price_txt": "Rp120rb", "mode": CityManager.ToolMode.FIRE_STATION, "tile_type": CityData.TileType.FIRE_STATION, "cost": CityData.COST_FIRE_STATION},
+		{"name": "BtnZoneMilitary", "label": "Z. Militer", "price_txt": "Rp2rb", "mode": CityManager.ToolMode.ZONE_MILITARY, "tile_type": CityData.TileType.ZONE_MILITARY, "cost": CityData.COST_ZONE_MILITARY},
+		{"name": "BtnTrainStation", "label": "Stasiun", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.TRAIN_STATION, "tile_type": CityData.TileType.TRAIN_STATION, "cost": CityData.COST_TRAIN_STATION},
+		{"name": "BtnRail", "label": "Rel Kereta", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.RAIL, "tile_type": CityData.TileType.RAIL, "cost": CityData.COST_RAIL},
+		{"name": "BtnStopAngkot", "label": "Hlt Angkot", "price_txt": "Rp10rb", "mode": CityManager.ToolMode.STOP_ANGKOT, "tile_type": CityData.TileType.STOP_ANGKOT, "cost": CityData.COST_STOP_ANGKOT},
+		{"name": "BtnStopBus", "label": "Hlt Bus", "price_txt": "Rp15rb", "mode": CityManager.ToolMode.STOP_BUS, "tile_type": CityData.TileType.STOP_BUS, "cost": CityData.COST_STOP_BUS},
+		{"name": "BtnBuswayLane", "label": "Jlr Busway", "price_txt": "Rp8rb", "mode": CityManager.ToolMode.BUSWAY_LANE, "tile_type": CityData.TileType.BUSWAY_LANE, "cost": CityData.COST_BUSWAY_LANE},
+		{"name": "BtnStopBusway", "label": "Hlt Busway", "price_txt": "Rp25rb", "mode": CityManager.ToolMode.STOP_BUSWAY, "tile_type": CityData.TileType.STOP_BUSWAY, "cost": CityData.COST_STOP_BUSWAY},
+		{"name": "BtnWidenRoad", "label": "Lebarin Jln", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.WIDEN_ROAD, "tile_type": CityData.TileType.ROAD, "cost": CityData.COST_WIDEN_ROAD},
+		{"name": "BtnFlyover", "label": "Flyover", "price_txt": "Rp20rb", "mode": CityManager.ToolMode.FLYOVER, "tile_type": CityData.TileType.FLYOVER, "cost": CityData.COST_FLYOVER},
+		{"name": "BtnRunway", "label": "Landasan", "price_txt": "Rp5rb", "mode": CityManager.ToolMode.RUNWAY, "tile_type": CityData.TileType.RUNWAY, "cost": CityData.COST_RUNWAY},
+		{"name": "BtnTerminal", "label": "Terminal", "price_txt": "Rp300rb", "mode": CityManager.ToolMode.AIRPORT_TERMINAL, "tile_type": CityData.TileType.AIRPORT_TERMINAL, "cost": CityData.COST_AIRPORT_TERMINAL}
 	]
 	public_tool_defs.clear()
 	for spec in pub_specs:
@@ -756,6 +767,21 @@ func _setup_utility_buttons() -> void:
 			city_manager.set_underground_view(pressed_on)
 	)
 	hbox.add_child(btn_underground)
+
+	var buy_specs := [
+		{"name": "BtnBuyKopaja", "text": "+Kopaja\nRp80rb", "fn": func(): if city_manager: city_manager.buy_kopaja_bus()},
+		{"name": "BtnBuyBusway", "text": "+Busway\nRp120rb", "fn": func(): if city_manager: city_manager.buy_busway_unit()},
+		{"name": "BtnBuyPlane", "text": "+Pesawat\nRp200rb", "fn": func(): if city_manager: city_manager.buy_airplane()}
+	]
+	for bsp in buy_specs:
+		var bb := Button.new()
+		bb.name = bsp["name"]
+		bb.text = bsp["text"]
+		bb.custom_minimum_size = Vector2(78, 44)
+		bb.add_theme_font_size_override("font_size", 10)
+		UIThemeHelper.apply_btn_secondary(bb, 44.0)
+		bb.pressed.connect(bsp["fn"])
+		hbox.add_child(bb)
 
 func _format_number(val: int) -> String:
 	var s := str(val)

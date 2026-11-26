@@ -280,6 +280,29 @@ static func load_season2(data: CityData) -> bool:
 				if t.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY:
 					data.water_pipes[Vector2i(x, y)] = true
 
+	data.security = float(cfg.get_value("city", "security", 50.0))
+	data.health = float(cfg.get_value("city", "health", 70.0))
+	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
+	var af2 = cfg.get_value("city", "active_fire", {})
+	data.active_fire = af2.duplicate(true) if af2 is Dictionary else {}
+	var tr = cfg.get_value("city", "transport", {})
+	if tr is Dictionary:
+		data.bus_kopaja_count = int(tr.get("bus_kopaja", 0))
+		data.busway_count = int(tr.get("busway", 0))
+	var wr = cfg.get_value("city", "wide_roads", [])
+	if wr is Array:
+		for p in wr:
+			if p is Vector2i:
+				data.wide_roads[p] = true
+	var fl = cfg.get_value("city", "flyovers", [])
+	if fl is Array:
+		for p in fl:
+			if p is Vector2i:
+				data.flyovers[p] = true
+	var ap = cfg.get_value("city", "airport", {})
+	if ap is Dictionary:
+		data.airplane_count = int(ap.get("airplanes", 0))
+
 	data.update_utilities()
 	data.city_level = CityData.get_city_tier(data.population)
 
