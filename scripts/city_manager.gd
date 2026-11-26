@@ -1184,6 +1184,60 @@ func save_game(is_manual: bool = false) -> bool:
 		show_toast.emit("Permainan berhasil disimpan!")
 	return ok
 
+func buy_kopaja_bus() -> void:
+	if city_data.bus_kopaja_count >= 3:
+		show_toast.emit("Maksimal 3 Bus Kota (Kopaja)!")
+		return
+	if city_data.count_public_type(CityData.TileType.STOP_BUS) < 1:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Bangun minimal 1 Halte Bus dulu!")
+		return
+	if city_data.money < CityData.COST_BUS_KOPAJA:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Uang tidak cukup!")
+		return
+	city_data.money -= CityData.COST_BUS_KOPAJA
+	city_data.bus_kopaja_count += 1
+	AudioManager.play_sfx(self, "build")
+	show_toast.emit("Bus Kota (Kopaja) #%d beroperasi!" % city_data.bus_kopaja_count)
+	city_updated.emit(city_data)
+
+func buy_busway_unit() -> void:
+	if city_data.busway_count >= 2:
+		show_toast.emit("Maksimal 2 Busway!")
+		return
+	if city_data.count_public_type(CityData.TileType.STOP_BUSWAY) < 1:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Bangun Halte Busway dulu!")
+		return
+	if city_data.money < CityData.COST_BUSWAY_UNIT:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Uang tidak cukup!")
+		return
+	city_data.money -= CityData.COST_BUSWAY_UNIT
+	city_data.busway_count += 1
+	AudioManager.play_sfx(self, "build")
+	show_toast.emit("Busway #%d beroperasi!" % city_data.busway_count)
+	city_updated.emit(city_data)
+
+func buy_airplane() -> void:
+	if city_data.airplane_count >= 2:
+		show_toast.emit("Maksimal 2 Pesawat!")
+		return
+	if city_data.count_public_type(CityData.TileType.RUNWAY) < 20 or city_data.count_public_type(CityData.TileType.AIRPORT_TERMINAL) < 1:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Butuh 20 tile Landasan + Terminal Bandara!")
+		return
+	if city_data.money < CityData.COST_AIRPLANE:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Uang tidak cukup!")
+		return
+	city_data.money -= CityData.COST_AIRPLANE
+	city_data.airplane_count += 1
+	AudioManager.play_sfx(self, "build")
+	show_toast.emit("Pesawat #%d siap lepas landas!" % city_data.airplane_count)
+	city_updated.emit(city_data)
+
 ## Bangun visual landscape peta (Pantai, Pegunungan, Sungai, Dataran Hijau, Hutan) — shared mesh/material
 func _build_landscape_visuals() -> void:
 	if landscape_root and is_instance_valid(landscape_root):
