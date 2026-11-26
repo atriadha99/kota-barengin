@@ -350,7 +350,6 @@ custom_minimum_size = Vector2(88, 44)
 layout_mode = 2
 text = "Bulldozer\nGratis"
 
-# --- MODAL PAK SLAMET (Langkah 5) ---
 [node name="PakSlametModal" type="PanelContainer" parent="."]
 visible = false
 anchors_preset = 8
@@ -422,7 +421,6 @@ size_flags_horizontal = 4
 theme_override_font_sizes/font_size = 13
 text = "Tutup"
 
-# --- MODAL BALAI KOTA (Langkah 5) ---
 [node name="TownHallModal" type="PanelContainer" parent="."]
 visible = false
 anchors_preset = 8
@@ -476,7 +474,6 @@ size_flags_horizontal = 4
 theme_override_font_sizes/font_size = 14
 text = "Tutup Balai Kota"
 
-# --- MODAL PROFIL WARGA (Langkah 5) ---
 [node name="CitizenProfileModal" type="PanelContainer" parent="."]
 visible = false
 anchors_preset = 8

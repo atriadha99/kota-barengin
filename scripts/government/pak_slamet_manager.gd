@@ -112,11 +112,6 @@ func _refresh_visuals() -> void:
 			active_mesh.position = world_pos + Vector3(0.55, 0.0, -0.55)
 			add_child(active_mesh)
 
-			# Bubble dialog Pak Slamet
-			bubble_mesh = BuildingBuilder.create_bubble_chat("Pak Slamet: Maju dikit, Pak, maju dikit! Parkir sini aja, aman!", true)
-			bubble_mesh.position = world_pos + Vector3(0.55, 0.0, -0.55)
-			add_child(bubble_mesh)
-
 	elif status.get("state") == "official":
 		var tiles: Array = status.get("official_parking_tiles", [])
 		if not tiles.is_empty():

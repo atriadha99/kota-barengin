@@ -405,6 +405,70 @@ static func _create_water_tower_mesh() -> Node3D:
 	node.add_child(tank)
 	return node
 
+## --- TAMAN KOTA LOW-POLY ---
+static func _create_park_mesh() -> Node3D:
+	var node := Node3D.new()
+
+	# Alas rumput hijau 1 tile
+	var grass := MeshInstance3D.new()
+	var grass_box := BoxMesh.new()
+	grass_box.size = Vector3(1.9, 0.04, 1.9)
+	var grass_mat := StandardMaterial3D.new()
+	grass_mat.albedo_color = Color(0.28, 0.65, 0.25)
+	grass_mat.roughness = 0.95
+	grass.mesh = grass_box
+	grass.material_override = grass_mat
+	grass.position = Vector3(0.0, 0.02, 0.0)
+	node.add_child(grass)
+
+	# Jalan setapak batu
+	var path := MeshInstance3D.new()
+	var path_box := BoxMesh.new()
+	path_box.size = Vector3(0.42, 0.045, 1.9)
+	var path_mat := StandardMaterial3D.new()
+	path_mat.albedo_color = Color(0.76, 0.73, 0.66)
+	path.mesh = path_box
+	path.material_override = path_mat
+	path.position = Vector3(0.0, 0.024, 0.0)
+	node.add_child(path)
+
+	# 2 Pohon kecil low-poly (batang + daun)
+	var trunk_mat := StandardMaterial3D.new()
+	trunk_mat.albedo_color = Color(0.45, 0.28, 0.16)
+	var leaf_mat := StandardMaterial3D.new()
+	leaf_mat.albedo_color = Color(0.18, 0.52, 0.20)
+
+	var tree_positions = [Vector3(-0.55, 0.0, -0.45), Vector3(0.55, 0.0, 0.40)]
+	for pos in tree_positions:
+		var trunk := MeshInstance3D.new()
+		var trunk_box := BoxMesh.new()
+		trunk_box.size = Vector3(0.16, 0.45, 0.16)
+		trunk.mesh = trunk_box
+		trunk.material_override = trunk_mat
+		trunk.position = pos + Vector3(0.0, 0.24, 0.0)
+		node.add_child(trunk)
+
+		var leaves := MeshInstance3D.new()
+		var leaves_box := BoxMesh.new()
+		leaves_box.size = Vector3(0.52, 0.50, 0.52)
+		leaves.mesh = leaves_box
+		leaves.material_override = leaf_mat
+		leaves.position = pos + Vector3(0.0, 0.65, 0.0)
+		node.add_child(leaves)
+
+	# 1 Bangku taman kecil
+	var bench_mat := StandardMaterial3D.new()
+	bench_mat.albedo_color = Color(0.58, 0.36, 0.18)
+	var bench_seat := MeshInstance3D.new()
+	var seat_box := BoxMesh.new()
+	seat_box.size = Vector3(0.22, 0.08, 0.50)
+	bench_seat.mesh = seat_box
+	bench_seat.material_override = bench_mat
+	bench_seat.position = Vector3(-0.45, 0.12, 0.45)
+	node.add_child(bench_seat)
+
+	return node
+
 ## --- PERTANIAN GANDUM (3 Tahap: Benih -> Tumbuh -> Siap Panen) ---
 static func _create_farm_mesh(stage: int) -> Node3D:
 	var node := Node3D.new()
@@ -851,17 +915,20 @@ static func create_bubble_chat(text: String, is_pak_slamet: bool = false) -> Nod
 	var label := Label3D.new()
 	label.text = text
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.font_size = 22
+	label.font_size = 18
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.width = 260.0
 	label.outline_render_priority = 1
-	label.outline_size = 4
-	label.outline_modulate = Color(0.05, 0.05, 0.05, 0.95)
-	label.no_depth_test = true
+	label.outline_size = 3
+	label.outline_modulate = Color(0.05, 0.05, 0.05, 0.92)
+	label.no_depth_test = false
 
 	if is_pak_slamet:
-		label.modulate = Color(1.0, 0.82, 0.25)
+		label.modulate = Color(1.0, 0.85, 0.28)
+		label.position = Vector3(0.0, 1.75, 0.0)
 	else:
 		label.modulate = Color(0.98, 0.98, 0.98)
+		label.position = Vector3(0.0, 1.35, 0.0)
 
-	label.position = Vector3(0.0, 1.35, 0.0)
 	root.add_child(label)
 	return root

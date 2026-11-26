@@ -15,11 +15,14 @@ class WalkerNPC:
 	var active: bool = false
 	var side_offset: Vector3 = Vector3(0.5, 0.0, 0.5) # Berjalan di pinggir jalan/trotoar
 	var bubble_node: Node3D = null
+	var bubble_text: String = ""
+	var complaint_order: int = 0
 	var active_complaint: Dictionary = {}
 	var thank_you_timer: float = 0.0
 
 var walkers: Array = []
 var city_data: CityData
+var _complaint_seq: int = 0
 
 func setup(p_city_data: CityData) -> void:
 	city_data = p_city_data
@@ -64,14 +67,22 @@ func _process(delta: float) -> void:
 			w.active = false
 		return
 
+	# Batasi jumlah pejalan kaki aktif sesuai jumlah jalan agar tidak menumpuk di 1-2 tile
+	var max_active: int = mini(walkers.size(), maxi(2, road_tiles.size()))
+
 	for i in range(walkers.size()):
 		var walker: WalkerNPC = walkers[i]
 
+		if i >= max_active:
+			walker.node.visible = false
+			walker.active = false
+			continue
+
 		if not walker.active or not _is_road(walker.current_tile) or not _is_road(walker.target_tile):
-			var start: Vector2i = road_tiles[(i * 2 + randi()) % road_tiles.size()]
+			var start: Vector2i = road_tiles[(i * 3) % road_tiles.size()]
 			walker.current_tile = start
 			walker.target_tile = _pick_next_road(start)
-			walker.progress = 0.0
+			walker.progress = float(i % 4) * 0.2
 			walker.active = true
 			walker.node.visible = true
 
@@ -159,8 +170,8 @@ func update_citizen_complaints() -> void:
 				if city_data.get_tile(x, y).get("type", CityData.TileType.EMPTY) == CityData.TileType.ROAD:
 					var road_count := 0
 					for dir in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-						var nx := x + dir.x
-						var ny := y + dir.y
+						var nx: int = x + dir.x
+						var ny: int = y + dir.y
 						if city_data.is_valid_tile(nx, ny) and city_data.get_tile(nx, ny).get("type", CityData.TileType.EMPTY) == CityData.TileType.ROAD:
 							road_count += 1
 					if road_count >= 3:
@@ -200,16 +211,31 @@ func _set_complaint(walker: WalkerNPC, complaint_type: String, location: String)
 
 	_show_bubble(walker, quote, false)
 
-func _show_bubble(walker: WalkerNPC, text: String, is_pak_slamet: bool) -> void:
-	_remove_bubble(walker)
-	var bubble := BuildingBuilder.create_bubble_chat(text, is_pak_slamet)
-	walker.node.add_child(bubble)
-	walker.bubble_node = bubble
+func _show_bubble(walker: WalkerNPC, text: String, _is_pak_slamet: bool) -> void:
+	_complaint_seq += 1
+	walker.bubble_text = text
+	walker.complaint_order = _complaint_seq
 
 func _remove_bubble(walker: WalkerNPC) -> void:
+	walker.bubble_text = ""
 	if walker.bubble_node and is_instance_valid(walker.bubble_node):
 		walker.bubble_node.queue_free()
 		walker.bubble_node = null
+
+## Ambil daftar warga yang memiliki bubble aktif, diurutkan dari keluhan terbaru
+func get_active_bubble_entries() -> Array:
+	var entries: Array = []
+	for walker in walkers:
+		if walker.active and walker.node.visible and not walker.bubble_text.is_empty():
+			entries.append({
+				"world_pos": walker.node.global_position + Vector3(0.0, 1.15, 0.0),
+				"text": walker.bubble_text,
+				"is_pak_slamet": false,
+				"order": walker.complaint_order,
+				"walker": walker
+			})
+	entries.sort_custom(func(a, b): return a["order"] > b["order"])
+	return entries
 
 ## Ketika pengaduan diselesaikan, bubble berubah jadi terima kasih
 func resolve_complaint(complaint_type: String) -> void:
