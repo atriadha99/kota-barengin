@@ -196,6 +196,80 @@ func update_citizen_complaints() -> void:
 			if w_light.thank_you_timer <= 0.0:
 				_set_complaint(w_light, ComplaintsData.COMPLAINT_TRAFFIC_LIGHT, "Simpang Utama")
 
+	# Pemicu 4: Tidak ada Sekolah (Pop >= 100)
+	if city_data.population >= 100 and not city_data.has_working_public(CityData.TileType.SCHOOL) and walkers.size() > 3:
+		var w_school: WalkerNPC = walkers[3]
+		if w_school.thank_you_timer <= 0.0:
+			_set_complaint(w_school, ComplaintsData.COMPLAINT_NO_SCHOOL, "Area Perumahan")
+
+	# Pemicu 5: Tidak ada tempat berobat (Pop >= 50, tanpa Puskesmas & RS)
+	if city_data.population >= 50 and not city_data.has_working_public(CityData.TileType.CLINIC) and not city_data.has_working_public(CityData.TileType.HOSPITAL) and walkers.size() > 4:
+		var w_health: WalkerNPC = walkers[4]
+		if w_health.thank_you_timer <= 0.0:
+			_set_complaint(w_health, ComplaintsData.COMPLAINT_NO_HEALTH, "Lingkungan Kota")
+
+	# Pemicu 6: Tidak aman (Keamanan < 40)
+	if city_data.security < 40.0 and walkers.size() > 5:
+		var w_sec: WalkerNPC = walkers[5]
+		if w_sec.thank_you_timer <= 0.0:
+			_set_complaint(w_sec, ComplaintsData.COMPLAINT_INSECURE, "Jl. Sudirman")
+
+	# Pemicu 7: Takut kebakaran (Pop >= 100, tanpa Damkar)
+	if city_data.population >= 100 and not city_data.has_working_public(CityData.TileType.FIRE_STATION) and walkers.size() > 6:
+		var w_fire: WalkerNPC = walkers[6]
+		if w_fire.thank_you_timer <= 0.0:
+			_set_complaint(w_fire, ComplaintsData.COMPLAINT_NO_FIRE, "Area Kota")
+
+	# Pemicu 8: Angkot Ngetem (Pop >= 50, tanpa Halte Angkot)
+	if city_data.population >= 50 and city_data.count_public_type(CityData.TileType.STOP_ANGKOT) == 0 and walkers.size() > 7:
+		var w_angkot: WalkerNPC = walkers[7]
+		if w_angkot.thank_you_timer <= 0.0:
+			_set_complaint(w_angkot, ComplaintsData.COMPLAINT_ANGKOT_NGETEM, "Jalan Raya")
+
+	# Pemicu 9: Masalah Indonesia Lainnya (Pungli, Polusi, Banjir, Mati Listrik, Air Kotor, Jalan Rusak, Harga Naik, Pengangguran, Tidak Ada Transportasi, Kebisingan Bandara)
+	if city_data.population >= 100 and walkers.size() > 3:
+		if city_data.power_used > city_data.power_supply:
+			_set_complaint(walkers[3], ComplaintsData.COMPLAINT_BLACKOUT, "Gardu Kota")
+		elif city_data.water_used > city_data.water_supply:
+			_set_complaint(walkers[4], ComplaintsData.COMPLAINT_DIRTY_WATER, "Saluran Air")
+		elif city_data.count_public_type(CityData.TileType.STOP_ANGKOT) == 0 and city_data.count_public_type(CityData.TileType.STOP_BUS) == 0 and city_data.count_public_type(CityData.TileType.TRAIN_STATION) == 0:
+			_set_complaint(walkers[5], ComplaintsData.COMPLAINT_NO_TRANSIT, "Pusat Kota")
+		elif randf() < 0.25:
+			var sys_pool := [
+				ComplaintsData.COMPLAINT_PUNGLI,
+				ComplaintsData.COMPLAINT_POLLUTION,
+				ComplaintsData.COMPLAINT_FLOOD,
+				ComplaintsData.COMPLAINT_BAD_ROAD,
+				ComplaintsData.COMPLAINT_INFLATION,
+				ComplaintsData.COMPLAINT_UNEMPLOYMENT
+			]
+			var picked: String = sys_pool[randi() % sys_pool.size()]
+			_set_complaint(walkers[randi() % walkers.size()], picked, "Wilayah Kota")
+
+	# Pemicu 10: Kebisingan Bandara (rumah dalam radius 5 tile dari Landasan)
+	var runways := city_data.get_public_positions(CityData.TileType.RUNWAY)
+	if not runways.is_empty() and walkers.size() > 2:
+		var near_noise := false
+		for rpos in runways:
+			for dy in range(-5, 6):
+				for dx in range(-5, 6):
+					var t: Dictionary = city_data.get_tile(rpos.x + dx, rpos.y + dy)
+					if t.get("level", 0) > 0 and t.get("zone", CityData.BuildingZone.RESIDENTIAL) == CityData.BuildingZone.RESIDENTIAL:
+						near_noise = true
+						break
+				if near_noise:
+					break
+			if near_noise:
+				break
+		if near_noise:
+			_set_complaint(walkers[2], ComplaintsData.COMPLAINT_AIRPORT_NOISE, "Dekat Landasan")
+
+func trigger_fire_complaint(loc: String) -> void:
+	if walkers.is_empty():
+		return
+	var w: WalkerNPC = walkers[walkers.size() - 1]
+	_set_complaint(w, ComplaintsData.COMPLAINT_FIRE, loc)
+
 func _set_complaint(walker: WalkerNPC, complaint_type: String, location: String) -> void:
 	if walker.active_complaint.get("type", "") == complaint_type:
 		return # Sudah aktif

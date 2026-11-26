@@ -13,12 +13,16 @@ class SimpleCar:
 	var last_dir: Vector2i = Vector2i.ZERO
 
 var cars: Array = []
+var transit_vehicles: Array = [] # Angkot, Kopaja, Busway, Train
+var airplanes: Array = []
 var city_data: CityData
 var speed_multiplier: float = 1.0
+var is_angkot_ngetem_active: bool = false
 
 func setup(p_city_data: CityData) -> void:
 	city_data = p_city_data
 	_create_car_models()
+	_create_transit_models()
 
 func _create_car_models() -> void:
 	var colors = [
@@ -110,7 +114,8 @@ func _process(delta: float) -> void:
 		var p1 := CityData.tile_to_world_pos(car.current_tile.x, car.current_tile.y)
 		var p2 := CityData.tile_to_world_pos(car.target_tile.x, car.target_tile.y)
 		var cur_pos := p1.lerp(p2, car.progress)
-		cur_pos.y = 0.04
+		var on_flyover: bool = city_data.flyovers.has(car.current_tile) or city_data.flyovers.has(car.target_tile)
+		cur_pos.y = 1.08 if on_flyover else 0.04
 		car.node.global_position = cur_pos
 
 		# Rotasi menghadap arah jalan
@@ -119,10 +124,172 @@ func _process(delta: float) -> void:
 			var target_rot_y := atan2(-dir.x, -dir.z)
 			car.node.rotation.y = target_rot_y
 
+	_process_transit(delta, road_tiles)
+	_process_airplanes(delta)
+
 func _is_road(tile: Vector2i) -> bool:
 	if not city_data.is_valid_tile(tile.x, tile.y):
 		return false
-	return city_data.get_tile(tile.x, tile.y).get("type", CityData.TileType.EMPTY) == CityData.TileType.ROAD
+	var tp: int = city_data.get_tile(tile.x, tile.y).get("type", CityData.TileType.EMPTY)
+	return tp in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS, CityData.TileType.FLYOVER]
+
+func _create_transit_models() -> void:
+	var specs := [
+		{"kind": "angkot", "color": Color(0.22, 0.72, 0.90), "size": Vector3(0.46, 0.28, 0.85)},
+		{"kind": "kopaja", "color": Color(0.95, 0.52, 0.14), "size": Vector3(0.52, 0.36, 1.15)},
+		{"kind": "kopaja", "color": Color(0.95, 0.52, 0.14), "size": Vector3(0.52, 0.36, 1.15)},
+		{"kind": "kopaja", "color": Color(0.95, 0.52, 0.14), "size": Vector3(0.52, 0.36, 1.15)},
+		{"kind": "busway", "color": Color(0.88, 0.18, 0.18), "size": Vector3(0.54, 0.38, 1.35)},
+		{"kind": "busway", "color": Color(0.88, 0.18, 0.18), "size": Vector3(0.54, 0.38, 1.35)},
+		{"kind": "train", "color": Color(0.92, 0.94, 0.96), "size": Vector3(0.62, 0.44, 1.65)}
+	]
+	for sp in specs:
+		var n := Node3D.new()
+		n.visible = false
+		var m := MeshInstance3D.new()
+		var b := BoxMesh.new()
+		b.size = sp["size"]
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = sp["color"]
+		m.mesh = b
+		m.material_override = mat
+		m.position = Vector3(0.0, sp["size"].y * 0.5 + 0.06, 0.0)
+		n.add_child(m)
+		add_child(n)
+		transit_vehicles.append({
+			"kind": sp["kind"],
+			"node": n,
+			"cur": Vector2i(-1, -1),
+			"nxt": Vector2i(-1, -1),
+			"progress": 0.0,
+			"pause": 0.0,
+			"dir": Vector2i.ZERO
+		})
+
+	for _a in range(2):
+		var ap := BuildingBuilder.create_airplane_node()
+		ap.visible = false
+		add_child(ap)
+		airplanes.append({"node": ap, "timer": randf() * 12.0})
+
+func _process_transit(delta: float, road_tiles: Array) -> void:
+	is_angkot_ngetem_active = false
+	var kopaja_idx := 0
+	var busway_idx := 0
+	var busway_tiles := city_data.get_public_positions(CityData.TileType.BUSWAY_LANE)
+	busway_tiles.append_array(city_data.get_public_positions(CityData.TileType.STOP_BUSWAY))
+	var rail_tiles := city_data.get_public_positions(CityData.TileType.RAIL)
+	rail_tiles.append_array(city_data.get_public_positions(CityData.TileType.TRAIN_STATION))
+	var has_angkot_stop := city_data.count_public_type(CityData.TileType.STOP_ANGKOT) > 0
+	var has_2_stations := city_data.get_working_public_positions(CityData.TileType.TRAIN_STATION).size() >= 2
+
+	for tv in transit_vehicles:
+		var kind: String = tv["kind"]
+		var n: Node3D = tv["node"]
+		var pool: Array = []
+		var allowed := false
+		if kind == "angkot":
+			allowed = city_data.population >= 50 and not road_tiles.is_empty()
+			pool = road_tiles
+		elif kind == "kopaja":
+			allowed = kopaja_idx < city_data.bus_kopaja_count and not road_tiles.is_empty()
+			kopaja_idx += 1
+			pool = road_tiles
+		elif kind == "busway":
+			allowed = busway_idx < city_data.busway_count and not busway_tiles.is_empty() and city_data.has_working_public(CityData.TileType.STOP_BUSWAY)
+			busway_idx += 1
+			pool = busway_tiles
+		elif kind == "train":
+			allowed = has_2_stations and not rail_tiles.is_empty()
+			pool = rail_tiles
+
+		if not allowed:
+			n.visible = false
+			continue
+
+		if tv["pause"] > 0.0:
+			tv["pause"] -= delta * speed_multiplier
+			if kind == "angkot" and not has_angkot_stop:
+				is_angkot_ngetem_active = true
+			continue
+
+		var cur: Vector2i = tv["cur"]
+		var nxt: Vector2i = tv["nxt"]
+		if not (cur in pool) or not (nxt in pool):
+			cur = pool[randi() % pool.size()]
+			nxt = _pick_next_from_pool(cur, tv["dir"], pool)
+			tv["cur"] = cur
+			tv["nxt"] = nxt
+			tv["progress"] = 0.0
+
+		tv["progress"] += 1.9 * speed_multiplier * delta
+		if tv["progress"] >= 1.0:
+			tv["progress"] = 0.0
+			var prev := cur
+			cur = nxt
+			tv["dir"] = nxt - prev
+			nxt = _pick_next_from_pool(cur, tv["dir"], pool)
+			tv["cur"] = cur
+			tv["nxt"] = nxt
+			if kind == "angkot" and not has_angkot_stop and randf() < 0.25:
+				tv["pause"] = 2.5
+				is_angkot_ngetem_active = true
+
+		var p1 := CityData.tile_to_world_pos(cur.x, cur.y)
+		var p2 := CityData.tile_to_world_pos(nxt.x, nxt.y)
+		var pos := p1.lerp(p2, tv["progress"])
+		pos.y = 0.05
+		n.global_position = pos
+		n.visible = true
+		var d := (p2 - p1).normalized()
+		if d.length_squared() > 0.001:
+			n.rotation.y = atan2(-d.x, -d.z)
+
+func _pick_next_from_pool(from_tile: Vector2i, prev_dir: Vector2i, pool: Array) -> Vector2i:
+	var opts: Array[Vector2i] = []
+	var non_rev: Array[Vector2i] = []
+	for dir in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var nxt := from_tile + dir
+		if nxt in pool:
+			opts.append(nxt)
+			if prev_dir != Vector2i.ZERO and dir != -prev_dir:
+				non_rev.append(nxt)
+	if not non_rev.is_empty():
+		return non_rev[randi() % non_rev.size()]
+	if not opts.is_empty():
+		return opts[randi() % opts.size()]
+	return from_tile
+
+func _process_airplanes(delta: float) -> void:
+	var runways := city_data.get_public_positions(CityData.TileType.RUNWAY)
+	var airport_ok := city_data.has_working_airport() and not runways.is_empty()
+	for idx in range(airplanes.size()):
+		var ap: Dictionary = airplanes[idx]
+		var node: Node3D = ap["node"]
+		if idx >= city_data.airplane_count or runways.is_empty():
+			node.visible = false
+			continue
+		var base_tile: Vector2i = runways[mini(idx * 3, runways.size() - 1)]
+		var base_pos := CityData.tile_to_world_pos(base_tile.x, base_tile.y)
+		if not airport_ok:
+			node.visible = true
+			node.global_position = base_pos + Vector3(0.0, 0.05, 0.0)
+			continue
+		ap["timer"] = fmod(float(ap["timer"]) + delta * speed_multiplier, 24.0)
+		var t: float = float(ap["timer"])
+		if t < 6.0:
+			node.visible = true
+			node.global_position = base_pos + Vector3(0.0, 0.05, 0.0)
+		elif t < 12.0:
+			var k: float = (t - 6.0) / 6.0
+			node.visible = true
+			node.global_position = base_pos + Vector3(0.0, 0.05 + k * 14.0, k * 18.0)
+		elif t < 18.0:
+			node.visible = false
+		else:
+			var k: float = (24.0 - t) / 6.0
+			node.visible = true
+			node.global_position = base_pos + Vector3(0.0, 0.05 + k * 14.0, -k * 18.0)
 
 func _pick_next_road(from_tile: Vector2i, prev_dir: Vector2i) -> Vector2i:
 	var neighbors: Array[Vector2i] = [

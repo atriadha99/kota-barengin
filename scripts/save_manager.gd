@@ -1,25 +1,88 @@
-extends Node
+class_name SaveManager
+extends RefCounted
 
-## Autoload SaveManager: Mengelola Save/Load Season 2 (Mode Walikota) secara offline-first dengan ConfigFile
-## Save Season 2 disimpan di user://save_season2.cfg (terpisah dari save_season1.cfg)
+static var load_on_start: bool = false
+static var s1_load_on_start: bool = false
+static var s2_carryover_from_s1: bool = false
+static var selected_landscape: String = "dataran"
 
+## Mengelola Save/Load per Season (Season 1, 2, 3) secara offline-first dengan ConfigFile
+
+const SAVE_SEASON1_PATH: String = "user://save_season1.cfg"
 const SAVE_SEASON2_PATH: String = "user://save_season2.cfg"
+const SAVE_SEASON3_PATH: String = "user://save_season3.cfg"
 const LEGACY_SAVE_PATH: String = "user://save.cfg"
 const SETTINGS_PATH: String = "user://settings.cfg"
 
-## Flag lintas-scene: true jika pemain menekan "Lanjutkan" di Main Menu
-var load_on_start: bool = false
+static func has_save() -> bool:
+	return has_save_s2()
 
-func has_save() -> bool:
+static func has_save_s1() -> bool:
+	return FileAccess.file_exists(SAVE_SEASON1_PATH)
+
+static func has_save_s2() -> bool:
 	return FileAccess.file_exists(SAVE_SEASON2_PATH) or FileAccess.file_exists(LEGACY_SAVE_PATH)
 
-func save_season2(data: CityData) -> bool:
+static func has_save_s3() -> bool:
+	return FileAccess.file_exists(SAVE_SEASON3_PATH)
+
+static func is_season1_completed() -> bool:
+	if not FileAccess.file_exists(SAVE_SEASON1_PATH):
+		return false
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_SEASON1_PATH) != OK:
+		return false
+	return bool(cfg.get_value("warga", "season1_selesai", false))
+
+static func get_s1_carryover_data() -> Dictionary:
+	var result: Dictionary = {
+		"mayor_name": "Walikota",
+		"mayor_age": 25,
+		"popularity": 70.0,
+		"integrity": 80.0,
+		"starting_money": 500000
+	}
+	if not FileAccess.file_exists(SAVE_SEASON1_PATH):
+		return result
+	var cfg := ConfigFile.new()
+	if cfg.load(SAVE_SEASON1_PATH) != OK:
+		return result
+	if not bool(cfg.get_value("warga", "season1_selesai", false)):
+		return result
+
+	var s1_name: String = str(cfg.get_value("warga", "nama", "Walikota"))
+	if not s1_name.is_empty():
+		result["mayor_name"] = s1_name
+	result["mayor_age"] = int(cfg.get_value("warga", "umur", 25))
+	result["popularity"] = float(cfg.get_value("warga", "popularitas", 70.0))
+	result["integrity"] = float(cfg.get_value("warga", "integritas", 80.0))
+	var s1_uang: int = int(cfg.get_value("warga", "uang", 0))
+	result["starting_money"] = mini(5000000, 500000 + int(float(s1_uang) * 0.10))
+	return result
+
+static func save_season3_placeholder() -> bool:
+	var cfg := ConfigFile.new()
+	cfg.set_value("presiden", "initialized", false)
+	return cfg.save(SAVE_SEASON3_PATH) == OK
+
+static func load_season3_placeholder() -> bool:
+	if not FileAccess.file_exists(SAVE_SEASON3_PATH):
+		return false
+	var cfg := ConfigFile.new()
+	return cfg.load(SAVE_SEASON3_PATH) == OK
+
+static func save_season2(data: CityData) -> bool:
 	if not data:
 		return false
 
 	var cfg := ConfigFile.new()
 
 	# Data utama kota
+	cfg.set_value("city", "mayor_name", data.mayor_name)
+	cfg.set_value("city", "mayor_age", data.mayor_age)
+	cfg.set_value("city", "map_landscape", data.map_landscape)
+	cfg.set_value("city", "unlocked_regions", data.unlocked_regions.duplicate())
+	cfg.set_value("city", "regions_bought", data.regions_bought)
 	cfg.set_value("city", "money", data.money)
 	cfg.set_value("city", "population", data.population)
 	cfg.set_value("city", "month", data.month)
@@ -27,6 +90,7 @@ func save_season2(data: CityData) -> bool:
 	cfg.set_value("city", "tax_rate", data.tax_rate)
 	cfg.set_value("city", "happiness", data.happiness)
 	cfg.set_value("city", "popularity", data.popularity)
+	cfg.set_value("city", "integrity", data.integrity)
 	cfg.set_value("city", "city_level", data.city_level)
 	cfg.set_value("city", "wheat_inventory", data.wheat_inventory)
 	cfg.set_value("city", "wheat_price", data.wheat_price)
@@ -58,11 +122,25 @@ func save_season2(data: CityData) -> bool:
 					t.get("level", 0),
 					t.get("zone", CityData.BuildingZone.RESIDENTIAL)
 				])
+	# Simpan tile di wilayah perluasan
+	var extra_arr: Array = []
+	for k in data.extra_tiles.keys():
+		var tv: Dictionary = data.extra_tiles[k]
+		if tv.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY:
+			extra_arr.append([k.x, k.y, tv.get("type", 0), tv.get("level", 0), tv.get("zone", 0)])
+	cfg.set_value("tiles", "extra_tiles", extra_arr)
+	cfg.set_value("tiles", "power_cables", data.power_cables.keys())
+	cfg.set_value("tiles", "water_pipes", data.water_pipes.keys())
+	cfg.set_value("city", "security", data.security)
+	cfg.set_value("city", "health", data.health)
+	cfg.set_value("city", "fire_cooldown_months", data.fire_cooldown_months)
+	cfg.set_value("city", "active_fire", data.active_fire.duplicate(true))
+	cfg.set_value("city", "public_buildings", data.get_public_buildings_list())
 
 	var err := cfg.save(SAVE_SEASON2_PATH)
 	return err == OK
 
-func load_season2(data: CityData) -> bool:
+static func load_season2(data: CityData) -> bool:
 	if not data:
 		return false
 
@@ -80,13 +158,28 @@ func load_season2(data: CityData) -> bool:
 		return false
 
 	# Data kota dengan nilai default aman
-	data.money = int(cfg.get_value("city", "money", 150000))
+	data.mayor_name = str(cfg.get_value("city", "mayor_name", "Walikota"))
+	data.mayor_age = int(cfg.get_value("city", "mayor_age", 25))
+	data.map_landscape = str(cfg.get_value("city", "map_landscape", "dataran"))
+	var reg_val = cfg.get_value("city", "unlocked_regions", [Vector2i(0, 0)])
+	if reg_val is Array and not reg_val.is_empty():
+		data.unlocked_regions = reg_val.duplicate()
+	else:
+		data.unlocked_regions = [Vector2i(0, 0)]
+	data.regions_bought = int(cfg.get_value("city", "regions_bought", 0))
+	data.money = int(cfg.get_value("city", "money", 500000))
 	data.population = int(cfg.get_value("city", "population", 0))
 	data.month = int(cfg.get_value("city", "month", 1))
 	data.year = int(cfg.get_value("city", "year", 1))
 	data.tax_rate = float(cfg.get_value("city", "tax_rate", 0.08))
 	data.happiness = float(cfg.get_value("city", "happiness", 70.0))
 	data.popularity = float(cfg.get_value("city", "popularity", 70.0))
+	data.integrity = float(cfg.get_value("city", "integrity", 80.0))
+	data.security = float(cfg.get_value("city", "security", 50.0))
+	data.health = float(cfg.get_value("city", "health", 70.0))
+	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
+	var af = cfg.get_value("city", "active_fire", {})
+	data.active_fire = af.duplicate(true) if af is Dictionary else {}
 	data.city_level = str(cfg.get_value("city", "city_level", CityData.get_city_tier(data.population)))
 	data.wheat_inventory = int(cfg.get_value("city", "wheat_inventory", 0))
 	data.wheat_price = int(cfg.get_value("city", "wheat_price", 1200))
@@ -144,6 +237,38 @@ func load_season2(data: CityData) -> bool:
 				var arr = cfg.get_value("tiles", key, null)
 				if arr is Array and arr.size() >= 3:
 					data.set_tile(x, y, int(arr[0]), int(arr[1]), int(arr[2]))
+	var extra_loaded = cfg.get_value("tiles", "extra_tiles", [])
+	if extra_loaded is Array:
+		for item in extra_loaded:
+			if item is Array and item.size() >= 5:
+				data.set_tile(int(item[0]), int(item[1]), int(item[2]), int(item[3]), int(item[4]))
+
+	# Muat kabel & pipa (save lama tanpa key dianggap tersambung otomatis)
+	if cfg.has_section_key("tiles", "power_cables"):
+		var pc = cfg.get_value("tiles", "power_cables", [])
+		if pc is Array:
+			for p in pc:
+				if p is Vector2i:
+					data.power_cables[p] = true
+	else:
+		for y in range(CityData.GRID_SIZE):
+			for x in range(CityData.GRID_SIZE):
+				var t: Dictionary = data.get_tile(x, y)
+				if t.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY:
+					data.power_cables[Vector2i(x, y)] = true
+
+	if cfg.has_section_key("tiles", "water_pipes"):
+		var wp = cfg.get_value("tiles", "water_pipes", [])
+		if wp is Array:
+			for p in wp:
+				if p is Vector2i:
+					data.water_pipes[p] = true
+	else:
+		for y in range(CityData.GRID_SIZE):
+			for x in range(CityData.GRID_SIZE):
+				var t: Dictionary = data.get_tile(x, y)
+				if t.get("type", CityData.TileType.EMPTY) != CityData.TileType.EMPTY:
+					data.water_pipes[Vector2i(x, y)] = true
 
 	data.update_utilities()
 	data.city_level = CityData.get_city_tier(data.population)
@@ -154,7 +279,7 @@ func load_season2(data: CityData) -> bool:
 
 	return true
 
-func save_settings(settings: Dictionary) -> void:
+static func save_settings(settings: Dictionary) -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("audio", "master_volume", float(settings.get("master_volume", 80.0)))
 	cfg.set_value("audio", "music_volume", float(settings.get("music_volume", 70.0)))
@@ -162,7 +287,7 @@ func save_settings(settings: Dictionary) -> void:
 	cfg.set_value("audio", "muted", bool(settings.get("muted", false)))
 	cfg.save(SETTINGS_PATH)
 
-func load_settings() -> Dictionary:
+static func load_settings() -> Dictionary:
 	var result: Dictionary = {
 		"master_volume": 80.0,
 		"music_volume": 70.0,

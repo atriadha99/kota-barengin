@@ -44,19 +44,61 @@ static func create_tile_node(type: CityData.TileType, level: int = 0, zone: City
 			root.add_child(_create_official_parking_mesh())
 		CityData.TileType.TOWNHALL:
 			root.add_child(_create_townhall_mesh())
+		CityData.TileType.SCHOOL:
+			root.add_child(_create_school_mesh())
+		CityData.TileType.CLINIC:
+			root.add_child(_create_clinic_mesh())
+		CityData.TileType.HOSPITAL:
+			root.add_child(_create_hospital_mesh())
+		CityData.TileType.POLICE:
+			root.add_child(_create_police_mesh())
+		CityData.TileType.MILITARY:
+			root.add_child(_create_military_mesh())
+		CityData.TileType.MAYOR_OFFICE:
+			root.add_child(_create_mayor_office_mesh())
+		CityData.TileType.FIRE_STATION:
+			root.add_child(_create_fire_station_mesh())
+		CityData.TileType.ZONE_MILITARY:
+			if level == 0:
+				root.add_child(_create_zone_marker(Color(0.28, 0.45, 0.22, 0.45)))
+			else:
+				root.add_child(_create_military_zone_mesh(level))
+		CityData.TileType.TRAIN_STATION:
+			root.add_child(_create_train_station_mesh())
+		CityData.TileType.RAIL:
+			root.add_child(_create_rail_mesh())
+		CityData.TileType.STOP_ANGKOT:
+			root.add_child(_create_road_mesh())
+			root.add_child(_create_stop_mesh(Color(0.22, 0.72, 0.88)))
+		CityData.TileType.STOP_BUS:
+			root.add_child(_create_road_mesh())
+			root.add_child(_create_stop_mesh(Color(0.95, 0.58, 0.16)))
+		CityData.TileType.BUSWAY_LANE:
+			root.add_child(_create_busway_lane_mesh())
+		CityData.TileType.STOP_BUSWAY:
+			root.add_child(_create_busway_lane_mesh())
+			root.add_child(_create_stop_busway_mesh())
+		CityData.TileType.FLYOVER:
+			root.add_child(_create_road_mesh())
+			root.add_child(_create_flyover_mesh())
+		CityData.TileType.RUNWAY:
+			root.add_child(_create_runway_mesh())
+		CityData.TileType.AIRPORT_TERMINAL:
+			root.add_child(_create_airport_terminal_mesh())
 
 	# Indikator jika bangunan tidak mendapat suplai utilitas (listrik / air)
-	if not has_util and (type == CityData.TileType.BUILDING or (level > 0 and type in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I])):
+	var needs_util_badge: bool = (type == CityData.TileType.BUILDING or (level > 0 and type in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I, CityData.TileType.ZONE_MILITARY]) or (type in CityData.PUBLIC_BUILDING_TYPES) or (type in [CityData.TileType.TRAIN_STATION, CityData.TileType.STOP_BUSWAY, CityData.TileType.AIRPORT_TERMINAL]))
+	if not has_util and needs_util_badge:
 		var badge := Label3D.new()
-		badge.text = "⚠️"
+		badge.text = "!" if ((type in CityData.PUBLIC_BUILDING_TYPES) or (type in [CityData.TileType.ZONE_MILITARY, CityData.TileType.TRAIN_STATION, CityData.TileType.STOP_BUSWAY, CityData.TileType.AIRPORT_TERMINAL])) else "⚠️"
 		badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		badge.font_size = 28
-		badge.modulate = Color(1.0, 0.3, 0.3)
+		badge.font_size = 32 if (type in CityData.PUBLIC_BUILDING_TYPES) else 28
+		badge.modulate = Color(1.0, 0.25, 0.25)
 		badge.outline_render_priority = 1
 		badge.outline_size = 4
 		badge.outline_modulate = Color(0.1, 0.1, 0.1)
 		badge.no_depth_test = true
-		badge.position = Vector3(0.0, 0.8 + float(level) * 0.7, 0.0)
+		badge.position = Vector3(0.0, 1.8 if (type in CityData.PUBLIC_BUILDING_TYPES) else (0.8 + float(level) * 0.7), 0.0)
 		root.add_child(badge)
 
 	return root
@@ -719,6 +761,242 @@ static func _create_townhall_mesh() -> Node3D:
 	flag_white.position = Vector3(0.1, 2.77, 0.0)
 	node.add_child(flag_white)
 
+	return node
+
+static func _add_box(parent: Node3D, size: Vector3, pos: Vector3, color: Color, emissive: bool = false) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	if emissive:
+		mat.emission_enabled = true
+		mat.emission = color
+		mat.emission_energy_multiplier = 0.8
+	m.mesh = box
+	m.material_override = mat
+	m.position = pos
+	parent.add_child(m)
+	return m
+
+static func _add_prism_roof(parent: Node3D, size: Vector3, pos: Vector3, color: Color) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var prism := PrismMesh.new()
+	prism.size = size
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = color
+	m.mesh = prism
+	m.material_override = mat
+	m.position = pos
+	parent.add_child(m)
+	return m
+
+static func _create_school_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.8, 0.10, 1.8), Vector3(0.0, 0.05, 0.0), Color(0.75, 0.75, 0.72))
+	_add_box(node, Vector3(1.5, 0.90, 1.2), Vector3(0.0, 0.55, -0.1), Color(0.95, 0.88, 0.55))
+	_add_prism_roof(node, Vector3(1.6, 0.45, 1.3), Vector3(0.0, 1.22, -0.1), Color(0.85, 0.40, 0.20))
+	_add_box(node, Vector3(0.55, 0.16, 0.06), Vector3(0.0, 0.95, 0.52), Color(0.18, 0.42, 0.78)) # Papan nama
+	_add_box(node, Vector3(0.04, 0.65, 0.04), Vector3(-0.65, 0.42, 0.65), Color(0.85, 0.85, 0.88)) # Tiang bendera
+	_add_box(node, Vector3(0.18, 0.08, 0.02), Vector3(-0.55, 0.70, 0.65), Color(0.90, 0.12, 0.12))
+	_add_box(node, Vector3(0.18, 0.08, 0.02), Vector3(-0.55, 0.62, 0.65), Color(0.96, 0.96, 0.96))
+	return node
+
+static func _create_clinic_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.7, 0.10, 1.7), Vector3(0.0, 0.05, 0.0), Color(0.78, 0.80, 0.80))
+	_add_box(node, Vector3(1.35, 0.85, 1.2), Vector3(0.0, 0.52, 0.0), Color(0.96, 0.97, 0.98))
+	_add_prism_roof(node, Vector3(1.45, 0.40, 1.3), Vector3(0.0, 1.15, 0.0), Color(0.18, 0.68, 0.55))
+	# Palang hijau puskesmas
+	_add_box(node, Vector3(0.10, 0.30, 0.05), Vector3(0.0, 0.75, 0.62), Color(0.15, 0.72, 0.42))
+	_add_box(node, Vector3(0.30, 0.10, 0.05), Vector3(0.0, 0.75, 0.62), Color(0.15, 0.72, 0.42))
+	return node
+
+static func _create_hospital_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.9, 0.12, 1.9), Vector3(0.0, 0.06, 0.0), Color(0.76, 0.78, 0.82))
+	_add_box(node, Vector3(1.6, 1.45, 1.4), Vector3(0.0, 0.84, 0.0), Color(0.95, 0.96, 0.99))
+	_add_box(node, Vector3(0.9, 0.55, 0.9), Vector3(0.0, 1.84, 0.0), Color(0.90, 0.93, 0.97))
+	# Helipad di atap
+	_add_box(node, Vector3(0.75, 0.04, 0.75), Vector3(0.0, 2.13, 0.0), Color(0.28, 0.34, 0.42))
+	# Palang merah besar di depan
+	_add_box(node, Vector3(0.14, 0.44, 0.06), Vector3(0.0, 1.15, 0.72), Color(0.90, 0.18, 0.18))
+	_add_box(node, Vector3(0.44, 0.14, 0.06), Vector3(0.0, 1.15, 0.72), Color(0.90, 0.18, 0.18))
+	return node
+
+static func _create_police_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.75, 0.10, 1.75), Vector3(0.0, 0.05, 0.0), Color(0.70, 0.72, 0.76))
+	_add_box(node, Vector3(1.4, 0.95, 1.25), Vector3(0.0, 0.57, 0.0), Color(0.84, 0.87, 0.92))
+	_add_box(node, Vector3(1.44, 0.18, 1.29), Vector3(0.0, 0.96, 0.0), Color(0.16, 0.30, 0.62)) # List biru polisi
+	_add_box(node, Vector3(1.48, 0.10, 1.32), Vector3(0.0, 1.10, 0.0), Color(0.20, 0.25, 0.35))
+	_add_box(node, Vector3(0.20, 0.14, 0.16), Vector3(0.0, 1.22, 0.35), Color(0.20, 0.55, 1.0), true) # Sirene biru
+	return node
+
+static func _create_military_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.85, 0.10, 1.85), Vector3(0.0, 0.05, 0.0), Color(0.55, 0.55, 0.50))
+	_add_box(node, Vector3(1.45, 0.95, 1.35), Vector3(-0.08, 0.57, 0.0), Color(0.32, 0.42, 0.26))
+	_add_box(node, Vector3(1.52, 0.12, 1.42), Vector3(-0.08, 1.10, 0.0), Color(0.24, 0.30, 0.18))
+	# Menara pantau mini
+	_add_box(node, Vector3(0.35, 1.55, 0.35), Vector3(0.62, 0.87, -0.45), Color(0.38, 0.46, 0.30))
+	_add_box(node, Vector3(0.45, 0.12, 0.45), Vector3(0.62, 1.70, -0.45), Color(0.25, 0.30, 0.20))
+	# Tiang bendera merah-putih
+	_add_box(node, Vector3(0.04, 0.60, 0.04), Vector3(-0.62, 1.45, 0.45), Color(0.85, 0.85, 0.88))
+	_add_box(node, Vector3(0.18, 0.08, 0.02), Vector3(-0.52, 1.70, 0.45), Color(0.90, 0.12, 0.12))
+	_add_box(node, Vector3(0.18, 0.08, 0.02), Vector3(-0.52, 1.62, 0.45), Color(0.96, 0.96, 0.96))
+	return node
+
+static func _create_mayor_office_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.85, 0.14, 1.85), Vector3(0.0, 0.07, 0.0), Color(0.82, 0.80, 0.74))
+	_add_box(node, Vector3(1.50, 1.20, 1.35), Vector3(0.0, 0.74, 0.0), Color(0.95, 0.93, 0.86))
+	for px in [-0.52, -0.18, 0.18, 0.52]:
+		_add_box(node, Vector3(0.10, 1.05, 0.10), Vector3(px, 0.66, 0.70), Color(0.92, 0.76, 0.25))
+	_add_prism_roof(node, Vector3(1.60, 0.50, 1.45), Vector3(0.0, 1.59, 0.0), Color(0.68, 0.22, 0.20))
+	_add_box(node, Vector3(0.36, 0.36, 0.36), Vector3(0.0, 2.02, 0.0), Color(0.92, 0.76, 0.25))
+	return node
+
+static func _create_fire_station_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.80, 0.10, 1.80), Vector3(0.0, 0.05, 0.0), Color(0.68, 0.68, 0.70))
+	_add_box(node, Vector3(1.45, 0.95, 1.30), Vector3(-0.08, 0.57, 0.0), Color(0.86, 0.22, 0.20))
+	_add_box(node, Vector3(0.85, 0.55, 0.08), Vector3(-0.12, 0.38, 0.66), Color(0.75, 0.78, 0.82)) # Pintu garasi
+	_add_box(node, Vector3(0.36, 1.50, 0.36), Vector3(0.58, 0.85, -0.35), Color(0.78, 0.20, 0.18)) # Menara selang
+	_add_box(node, Vector3(0.20, 0.14, 0.16), Vector3(-0.10, 1.12, 0.45), Color(1.0, 0.32, 0.18), true) # Sirene merah
+	return node
+
+static func create_fire_effect_node() -> Node3D:
+	var root := Node3D.new()
+	root.name = "FireEffect"
+	_add_box(root, Vector3(0.55, 0.75, 0.55), Vector3(0.0, 1.25, 0.0), Color(1.0, 0.35, 0.10), true)
+	_add_box(root, Vector3(0.35, 0.95, 0.35), Vector3(0.15, 1.45, 0.12), Color(1.0, 0.72, 0.15), true)
+	_add_box(root, Vector3(0.30, 0.60, 0.30), Vector3(-0.18, 1.15, -0.12), Color(0.95, 0.22, 0.08), true)
+	var lbl := Label3D.new()
+	lbl.text = "KEBAKARAN!"
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 28
+	lbl.modulate = Color(1.0, 0.40, 0.15)
+	lbl.outline_size = 4
+	lbl.outline_modulate = Color(0.1, 0.05, 0.05)
+	lbl.no_depth_test = true
+	lbl.position = Vector3(0.0, 2.35, 0.0)
+	root.add_child(lbl)
+	return root
+
+static func create_damaged_badge_node(is_heavy: bool) -> Node3D:
+	var root := Node3D.new()
+	root.name = "FireDamagedBadge"
+	var lbl := Label3D.new()
+	lbl.text = "Rusak Berat! Rp25rb" if is_heavy else "Rusak Ringan! Rp10rb"
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 24
+	lbl.modulate = Color(1.0, 0.35, 0.35) if is_heavy else Color(1.0, 0.75, 0.25)
+	lbl.outline_size = 4
+	lbl.outline_modulate = Color(0.1, 0.1, 0.1)
+	lbl.no_depth_test = true
+	lbl.position = Vector3(0.0, 2.0, 0.0)
+	root.add_child(lbl)
+	return root
+
+static func create_wide_road_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(2.0, 0.04, 2.0), Vector3(0.0, 0.02, 0.0), Color(0.20, 0.20, 0.23))
+	_add_box(node, Vector3(0.10, 0.05, 1.8), Vector3(0.0, 0.025, 0.0), Color(0.95, 0.85, 0.25))
+	return node
+
+static func _create_military_zone_mesh(level: int) -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.9, 0.06, 1.9), Vector3(0.0, 0.03, 0.0), Color(0.32, 0.38, 0.25))
+	# Pagar hijau army di sekeliling
+	_add_box(node, Vector3(1.9, 0.20, 0.06), Vector3(0.0, 0.12, -0.92), Color(0.24, 0.30, 0.18))
+	_add_box(node, Vector3(1.9, 0.20, 0.06), Vector3(0.0, 0.12, 0.92), Color(0.24, 0.30, 0.18))
+	if level == 1:
+		_add_box(node, Vector3(1.2, 0.55, 0.8), Vector3(0.0, 0.32, 0.0), Color(0.35, 0.46, 0.28))
+		_add_prism_roof(node, Vector3(1.25, 0.25, 0.85), Vector3(0.0, 0.72, 0.0), Color(0.26, 0.34, 0.20))
+	elif level == 2:
+		_add_box(node, Vector3(1.3, 0.70, 1.0), Vector3(0.0, 0.40, 0.0), Color(0.38, 0.45, 0.30))
+		_add_box(node, Vector3(1.35, 0.12, 1.05), Vector3(0.0, 0.80, 0.0), Color(0.25, 0.30, 0.20))
+	else:
+		_add_box(node, Vector3(0.75, 0.65, 0.75), Vector3(-0.4, 0.36, -0.3), Color(0.35, 0.45, 0.28))
+		_add_box(node, Vector3(0.75, 0.08, 0.75), Vector3(0.4, 0.08, 0.35), Color(0.55, 0.52, 0.38)) # Lapangan latihan
+	return node
+
+static func _create_rail_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.6, 0.03, 2.0), Vector3(0.0, 0.015, 0.0), Color(0.35, 0.30, 0.25))
+	for z in [-0.7, -0.25, 0.25, 0.7]:
+		_add_box(node, Vector3(1.2, 0.05, 0.14), Vector3(0.0, 0.04, z), Color(0.45, 0.30, 0.18))
+	_add_box(node, Vector3(0.10, 0.07, 2.0), Vector3(-0.35, 0.07, 0.0), Color(0.68, 0.70, 0.74))
+	_add_box(node, Vector3(0.10, 0.07, 2.0), Vector3(0.35, 0.07, 0.0), Color(0.68, 0.70, 0.74))
+	return node
+
+static func _create_train_station_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.85, 0.12, 1.85), Vector3(0.0, 0.06, 0.0), Color(0.70, 0.72, 0.75))
+	_add_box(node, Vector3(1.5, 0.85, 1.1), Vector3(0.0, 0.55, -0.15), Color(0.88, 0.90, 0.94))
+	_add_prism_roof(node, Vector3(1.65, 0.45, 1.25), Vector3(0.0, 1.20, -0.15), Color(0.22, 0.45, 0.75))
+	_add_box(node, Vector3(0.8, 0.20, 0.06), Vector3(0.0, 0.95, 0.42), Color(0.15, 0.35, 0.65))
+	return node
+
+static func _create_stop_mesh(color: Color) -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(0.95, 0.55, 0.45), Vector3(0.45, 0.30, -0.55), Color(0.88, 0.90, 0.94))
+	_add_box(node, Vector3(1.05, 0.10, 0.55), Vector3(0.45, 0.60, -0.55), color)
+	return node
+
+static func _create_busway_lane_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(2.0, 0.035, 2.0), Vector3(0.0, 0.018, 0.0), Color(0.75, 0.25, 0.18))
+	_add_box(node, Vector3(0.12, 0.045, 1.8), Vector3(0.0, 0.025, 0.0), Color(0.96, 0.85, 0.25))
+	return node
+
+static func _create_stop_busway_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.2, 0.65, 0.70), Vector3(0.0, 0.35, 0.0), Color(0.90, 0.28, 0.20))
+	_add_box(node, Vector3(1.3, 0.10, 0.80), Vector3(0.0, 0.72, 0.0), Color(0.95, 0.78, 0.22))
+	return node
+
+static func _create_flyover_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(0.32, 0.90, 0.32), Vector3(-0.65, 0.45, 0.0), Color(0.62, 0.64, 0.68))
+	_add_box(node, Vector3(0.32, 0.90, 0.32), Vector3(0.65, 0.45, 0.0), Color(0.62, 0.64, 0.68))
+	_add_box(node, Vector3(2.0, 0.16, 1.75), Vector3(0.0, 0.95, 0.0), Color(0.32, 0.34, 0.38))
+	_add_box(node, Vector3(1.9, 0.18, 0.08), Vector3(0.0, 1.05, -0.82), Color(0.78, 0.80, 0.82))
+	_add_box(node, Vector3(1.9, 0.18, 0.08), Vector3(0.0, 1.05, 0.82), Color(0.78, 0.80, 0.82))
+	return node
+
+static func _create_runway_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(2.0, 0.04, 2.0), Vector3(0.0, 0.02, 0.0), Color(0.16, 0.17, 0.20))
+	_add_box(node, Vector3(1.3, 0.05, 0.14), Vector3(0.0, 0.028, 0.0), Color(0.95, 0.95, 0.95))
+	return node
+
+static func _create_airport_terminal_mesh() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(1.95, 0.14, 1.95), Vector3(0.0, 0.07, 0.0), Color(0.78, 0.80, 0.84))
+	_add_box(node, Vector3(1.75, 1.40, 1.30), Vector3(0.0, 0.84, 0.0), Color(0.94, 0.96, 0.98))
+	_add_box(node, Vector3(1.78, 0.55, 1.34), Vector3(0.0, 0.85, 0.0), Color(0.35, 0.68, 0.92)) # Kaca biru
+	_add_box(node, Vector3(1.85, 0.18, 1.40), Vector3(0.0, 1.62, 0.0), Color(0.84, 0.88, 0.92)) # Atap
+	# Menara kontrol mini
+	_add_box(node, Vector3(0.35, 2.25, 0.35), Vector3(0.70, 1.25, -0.55), Color(0.90, 0.92, 0.95))
+	_add_box(node, Vector3(0.55, 0.35, 0.55), Vector3(0.70, 2.45, -0.55), Color(0.28, 0.62, 0.88))
+	var lbl := Label3D.new()
+	lbl.text = "BANDARA KOTABARENG"
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 20
+	lbl.modulate = Color(0.98, 0.88, 0.28)
+	lbl.outline_size = 3
+	lbl.outline_modulate = Color(0.08, 0.08, 0.12)
+	lbl.position = Vector3(0.0, 2.1, 0.0)
+	node.add_child(lbl)
+	return node
+
+static func create_airplane_node() -> Node3D:
+	var node := Node3D.new()
+	_add_box(node, Vector3(0.32, 0.28, 1.45), Vector3(0.0, 0.28, 0.0), Color(0.96, 0.97, 0.99))
+	_add_box(node, Vector3(1.65, 0.06, 0.38), Vector3(0.0, 0.26, 0.05), Color(0.88, 0.90, 0.94))
+	_add_box(node, Vector3(0.08, 0.38, 0.28), Vector3(0.0, 0.52, -0.58), Color(0.18, 0.45, 0.85))
 	return node
 
 ## --- KARAKTER PAK SLAMET (Rompi Oranye Pudar, Topi Lusuh, Peluit) ---

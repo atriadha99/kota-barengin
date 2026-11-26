@@ -1,8 +1,9 @@
 class_name CameraController
 extends Node3D
 
-## Kontroler Kamera Orbit, Zoom, dan Pan untuk KotaBarengin (Godot 4.7)
+## Kontroler Kamera Orbit, Zoom, Pan (Mouse/Keyboard + Sentuh Android)
 signal tile_clicked(screen_pos: Vector2)
+signal tile_long_pressed(screen_pos: Vector2)
 
 @export var min_pitch: float = 30.0
 @export var max_pitch: float = 60.0
@@ -22,7 +23,17 @@ var is_panning: bool = false
 var lmb_pressed: bool = false
 var lmb_down_pos: Vector2 = Vector2.ZERO
 
+# State sentuh Android (multitouch pinch zoom + 1 jari pan/tap/long-press)
+var _all_touches: Dictionary = {} # index -> Vector2 (dipantau di _input agar pinch jalan walau 1 jari tahan tool)
+var _map_touches: Dictionary = {} # index -> { "pos": Vector2, "start_pos": Vector2, "moved": bool, "hold_time": float, "long_fired": bool }
+var _prev_pinch_dist: float = 0.0
+const LONG_PRESS_DURATION: float = 0.55
+
 @onready var camera: Camera3D = $Camera3D
+
+func rotate_yaw(delta_deg: float) -> void:
+	yaw = fposmod(yaw + delta_deg, 360.0)
+	_update_transform()
 
 func _ready() -> void:
 	_clamp_focus()
@@ -48,9 +59,83 @@ func _process(delta: float) -> void:
 		_clamp_focus()
 		_update_transform()
 
+	# Cek long-press 1 jari di peta
+	if _map_touches.size() == 1 and _all_touches.size() <= 1:
+		for idx in _map_touches.keys():
+			var td: Dictionary = _map_touches[idx]
+			if not td["moved"] and not td["long_fired"]:
+				td["hold_time"] = float(td["hold_time"]) + delta
+				if td["hold_time"] >= LONG_PRESS_DURATION:
+					td["long_fired"] = true
+					tile_long_pressed.emit(td["pos"])
+
+func _input(event: InputEvent) -> void:
+	# Pantau semua sentuhan untuk pinch 2 jari (tetap jalan walau 1 jari menahan tombol tool)
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			_all_touches[st.index] = st.position
+			if _all_touches.size() == 2:
+				var pts: Array = _all_touches.values()
+				_prev_pinch_dist = (pts[0] as Vector2).distance_to(pts[1] as Vector2)
+		else:
+			_all_touches.erase(st.index)
+			if _all_touches.size() < 2:
+				_prev_pinch_dist = 0.0
+	elif event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		_all_touches[sd.index] = sd.position
+		if _all_touches.size() == 2:
+			var pts: Array = _all_touches.values()
+			var dist: float = (pts[0] as Vector2).distance_to(pts[1] as Vector2)
+			if _prev_pinch_dist > 0.0:
+				var diff: float = dist - _prev_pinch_dist
+				zoom_distance = clampf(zoom_distance - diff * 0.04, min_zoom, max_zoom)
+				_update_transform()
+			_prev_pinch_dist = dist
+
 func _unhandled_input(event: InputEvent) -> void:
+	# Sentuh pada area peta (bukan UI)
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			_map_touches[st.index] = {
+				"pos": st.position,
+				"start_pos": st.position,
+				"moved": false,
+				"hold_time": 0.0,
+				"long_fired": false
+			}
+		else:
+			if _map_touches.has(st.index):
+				var td: Dictionary = _map_touches[st.index]
+				if not td["moved"] and not td["long_fired"] and _all_touches.size() <= 1:
+					tile_clicked.emit(st.position)
+				_map_touches.erase(st.index)
+		return
+
+	elif event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		if _map_touches.has(sd.index) and _all_touches.size() == 1:
+			var td: Dictionary = _map_touches[sd.index]
+			td["pos"] = sd.position
+			if not td["moved"] and sd.position.distance_to(td["start_pos"]) > 10.0:
+				td["moved"] = true
+			if td["moved"]:
+				var forward := -Vector3(sin(deg_to_rad(yaw)), 0.0, cos(deg_to_rad(yaw)))
+				var right := Vector3(cos(deg_to_rad(yaw)), 0.0, -sin(deg_to_rad(yaw)))
+				var drag_scale := 0.028 * (zoom_distance / 22.0)
+				var move := (-right * sd.relative.x + forward * sd.relative.y) * drag_scale
+				focus_position += move
+				_clamp_focus()
+				_update_transform()
+		return
+
+	# Kontrol Mouse untuk Laptop (abaikan mouse emulasi dari sentuhan agar tidak dobel)
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
+		if mb.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		if mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_MIDDLE:
 			is_orbiting = mb.pressed
 		elif mb.button_index == MOUSE_BUTTON_LEFT:
@@ -74,6 +159,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
+		if mm.device == InputEvent.DEVICE_ID_EMULATION:
+			return
 		if is_orbiting:
 			yaw -= mm.relative.x * orbit_sensitivity
 			yaw = fposmod(yaw, 360.0)
@@ -94,8 +181,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_update_transform()
 
 func _clamp_focus() -> void:
-	focus_position.x = clampf(focus_position.x, 0.0, CityData.MAP_SIZE)
-	focus_position.z = clampf(focus_position.z, 0.0, CityData.MAP_SIZE)
+	focus_position.x = clampf(focus_position.x, -24.0, CityData.MAP_SIZE + 24.0)
+	focus_position.z = clampf(focus_position.z, -24.0, CityData.MAP_SIZE + 24.0)
 	focus_position.y = 0.0
 
 func _update_transform() -> void:

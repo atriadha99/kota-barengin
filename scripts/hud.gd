@@ -72,6 +72,11 @@ var btn_cp_close: Button = null
 
 var tool_buttons: Dictionary = {}
 var speed_buttons: Dictionary = {}
+var btn_power_cable: Button = null
+var btn_water_pipe: Button = null
+var btn_underground: Button = null
+var label_security: Label = null
+var public_tool_defs: Array = []
 
 # Overlay Bubble Chat 2D (Langkah 5: maks 3 bubble, anti-tumpuk, clamp viewport)
 const MAX_BUBBLES: int = 3
@@ -83,6 +88,9 @@ var mission_vbox: VBoxContainer = null
 var pause_modal: PanelContainer = null
 var settings_modal: PanelContainer = null
 var _prev_speed_before_pause: float = 1.0
+var region_buy_modal: PanelContainer = null
+var lbl_region_buy: Label = null
+var _pending_region: Vector2i = Vector2i.ZERO
 
 func _ready() -> void:
 	if city_manager:
@@ -91,6 +99,7 @@ func _ready() -> void:
 		city_manager.open_pak_slamet_modal.connect(open_pak_slamet_dialog)
 		city_manager.open_citizen_modal.connect(open_citizen_profile_dialog)
 		city_manager.open_townhall_modal.connect(open_townhall_dialog)
+		city_manager.open_region_buy_modal.connect(_open_region_buy_dialog)
 
 	tool_buttons = {
 		CityManager.ToolMode.ROAD: btn_road,
@@ -104,12 +113,18 @@ func _ready() -> void:
 		CityManager.ToolMode.BULLDOZER: btn_bulldozer
 	}
 
+	_setup_utility_buttons()
+	tool_buttons[CityManager.ToolMode.POWER_CABLE] = btn_power_cable
+	tool_buttons[CityManager.ToolMode.WATER_PIPE] = btn_water_pipe
+
 	btn_road.pressed.connect(func(): _select_tool(CityManager.ToolMode.ROAD))
 	btn_zone_r.pressed.connect(func(): _select_tool(CityManager.ToolMode.ZONE_R))
 	btn_zone_c.pressed.connect(func(): _select_tool(CityManager.ToolMode.ZONE_C))
 	btn_zone_i.pressed.connect(func(): _select_tool(CityManager.ToolMode.ZONE_I))
 	btn_power.pressed.connect(func(): _select_tool(CityManager.ToolMode.POWER_PLANT))
 	btn_water.pressed.connect(func(): _select_tool(CityManager.ToolMode.WATER_TOWER))
+	btn_power_cable.pressed.connect(func(): _select_tool(CityManager.ToolMode.POWER_CABLE))
+	btn_water_pipe.pressed.connect(func(): _select_tool(CityManager.ToolMode.WATER_PIPE))
 	btn_park.pressed.connect(func(): _select_tool(CityManager.ToolMode.PARK))
 	btn_farm.pressed.connect(func(): _select_tool(CityManager.ToolMode.FARM))
 	btn_bulldozer.pressed.connect(func(): _select_tool(CityManager.ToolMode.BULLDOZER))
@@ -238,21 +253,29 @@ func _ready() -> void:
 	_setup_menu_button()
 	_setup_mission_panel()
 	_setup_pause_and_settings()
+	_setup_region_buy_modal()
+	_setup_touch_controls()
+	_polish_hud_topbar()
 	_select_tool(CityManager.ToolMode.ROAD)
 	_select_speed(1.0)
 	if city_manager and city_manager.city_data:
 		_on_city_updated(city_manager.city_data)
 
 func _select_tool(mode: CityManager.ToolMode) -> void:
+	if city_manager and city_manager.current_tool != mode:
+		AudioManager.play_sfx(self, "click")
 	if city_manager:
 		city_manager.set_tool(mode)
 
 	for m in tool_buttons:
 		var btn: Button = tool_buttons[m]
-		if m == mode:
-			btn.modulate = Color(1.2, 1.2, 0.5)
-		else:
-			btn.modulate = Color(1.0, 1.0, 1.0)
+		var is_sel: bool = (m == mode)
+		var sb := UIThemeHelper.make_panel_style(is_sel, 12, 8.0, 6.0, 0.96 if is_sel else 0.88)
+		if is_sel:
+			sb.bg_color = Color(0.20, 0.22, 0.30, 0.98)
+		btn.add_theme_stylebox_override("normal", sb)
+		btn.add_theme_stylebox_override("hover", sb)
+		btn.add_theme_stylebox_override("pressed", sb)
 
 func _select_speed(speed: float) -> void:
 	if city_manager:
@@ -291,6 +314,15 @@ func _on_city_updated(data: CityData) -> void:
 	else:
 		label_popularity.modulate = Color(1.0, 0.4, 0.4)
 
+	if label_security:
+		label_security.text = "Aman: %d%%" % int(round(data.security))
+		if data.security >= 70.0:
+			label_security.modulate = Color(0.35, 0.90, 0.50)
+		elif data.security >= 30.0:
+			label_security.modulate = Color(0.95, 0.85, 0.30)
+		else:
+			label_security.modulate = Color(1.0, 0.35, 0.35)
+
 	label_power.text = "Listrik: %d/%d" % [data.power_used, data.power_supply]
 	if data.power_used > data.power_supply:
 		label_power.modulate = Color(1.0, 0.3, 0.3)
@@ -325,11 +357,52 @@ func _on_city_updated(data: CityData) -> void:
 	if data.pak_slamet_status.get("state") == "active":
 		complaint_count += 1
 	if complaint_count > 0:
-		btn_townhall.text = "🏛 Balai Kota (%d)" % complaint_count
-		btn_townhall.modulate = Color(1.2, 1.1, 0.4)
+		btn_townhall.text = "Balai Kota (%d)" % complaint_count
+		UIThemeHelper.apply_btn_primary(btn_townhall, 32.0)
 	else:
-		btn_townhall.text = "🏛 Balai Kota"
-		btn_townhall.modulate = Color(1.0, 1.0, 1.0)
+		btn_townhall.text = "Balai Kota"
+		UIThemeHelper.apply_btn_secondary(btn_townhall, 32.0)
+
+	# Tandai harga tool yang tidak mampu dibeli (merah pudar)
+	var tool_costs := {
+		CityManager.ToolMode.ROAD: CityData.COST_ROAD,
+		CityManager.ToolMode.ZONE_R: CityData.COST_ZONE_R,
+		CityManager.ToolMode.ZONE_C: CityData.COST_ZONE_C,
+		CityManager.ToolMode.ZONE_I: CityData.COST_ZONE_I,
+		CityManager.ToolMode.POWER_PLANT: CityData.COST_POWER_PLANT,
+		CityManager.ToolMode.WATER_TOWER: CityData.COST_WATER_TOWER,
+		CityManager.ToolMode.POWER_CABLE: CityData.COST_POWER_CABLE,
+		CityManager.ToolMode.WATER_PIPE: CityData.COST_WATER_PIPE,
+		CityManager.ToolMode.PARK: CityData.COST_PARK,
+		CityManager.ToolMode.FARM: CityData.COST_FARM,
+		CityManager.ToolMode.BULLDOZER: 0
+	}
+	for m in tool_buttons:
+		var tbtn: Button = tool_buttons[m]
+		var tcost: int = int(tool_costs.get(m, 0))
+		if tcost > 0 and data.money < tcost:
+			tbtn.add_theme_color_override("font_color", Color(0.95, 0.45, 0.45))
+		else:
+			tbtn.add_theme_color_override("font_color", Color(0.96, 0.96, 0.98))
+
+	for pdef in public_tool_defs:
+		var p_btn: Button = pdef["btn"]
+		var p_type: int = pdef["tile_type"]
+		var p_cost: int = pdef["cost"]
+		var p_name: String = pdef["label"]
+		var p_price_txt: String = pdef["price_txt"]
+		var u_info: Dictionary = data.is_public_building_unlocked(p_type)
+		if not u_info.get("unlocked", false):
+			p_btn.disabled = true
+			p_btn.text = "%s\n%s" % [p_name, str(u_info.get("reason", "Terkunci"))]
+			p_btn.add_theme_color_override("font_color", Color(0.55, 0.58, 0.65))
+		else:
+			p_btn.disabled = false
+			p_btn.text = "%s\n%s" % [p_name, p_price_txt]
+			if data.money < p_cost:
+				p_btn.add_theme_color_override("font_color", Color(0.95, 0.45, 0.45))
+			else:
+				p_btn.add_theme_color_override("font_color", Color(0.96, 0.96, 0.98))
 
 	# Jika Balai Kota sedang terbuka, refresh daftarnya
 	if townhall_modal and townhall_modal.visible:
@@ -507,9 +580,149 @@ func _create_complaint_card(citizen: String, loc: String, quote: String, status_
 	return card
 
 func _show_toast(msg: String) -> void:
+	var low := msg.to_lower()
+	var is_err: bool = ("tidak cukup" in low) or ("kosong" in low) or ("kurang" in low) or ("harus" in low) or ("gagal" in low)
+	toast_label.add_theme_stylebox_override("normal", UIThemeHelper.make_toast_style(is_err))
+	toast_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.45) if is_err else Color(0.98, 0.98, 0.98))
 	toast_label.text = msg
 	toast_label.visible = true
 	toast_timer.start(3.0)
+
+func _polish_hud_topbar() -> void:
+	for p_name in ["TopPanel", "RightPanel", "TimeSpeedPanel", "TaxPanel", "FarmPanel", "BottomPalette"]:
+		var p_node := get_node_or_null(p_name) as PanelContainer
+		if p_node:
+			p_node.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 16, 12.0, 8.0, 0.92))
+
+	var top_hbox := get_node_or_null("TopPanel/HBox") as HBoxContainer
+	if not top_hbox:
+		return
+
+	var icon_map := {
+		"LabelMoney": "money",
+		"LabelPop": "pop",
+		"LabelHappiness": "happy",
+		"LabelPopularity": "pop",
+		"LabelPower": "power",
+		"LabelWater": "water",
+		"LabelDate": "date"
+	}
+	var chip_style := UIThemeHelper.make_chip_style()
+	for lbl in [label_money, label_pop, label_happiness, label_popularity, label_power, label_water, label_date, label_tier]:
+		if not lbl or not is_instance_valid(lbl):
+			continue
+		var idx: int = lbl.get_index()
+		var chip := PanelContainer.new()
+		chip.add_theme_stylebox_override("panel", chip_style)
+		var chbox := HBoxContainer.new()
+		chbox.add_theme_constant_override("separation", 5)
+		chip.add_child(chbox)
+		if icon_map.has(lbl.name):
+			chbox.add_child(S1VisualBuilder.StatIcon.new(icon_map[lbl.name]))
+		top_hbox.remove_child(lbl)
+		chbox.add_child(lbl)
+		top_hbox.add_child(chip)
+		top_hbox.move_child(chip, idx)
+
+	if btn_sell_wheat:
+		UIThemeHelper.apply_btn_primary(btn_sell_wheat, 40.0)
+
+	# Chip Keamanan (0-100) di TopPanel
+	if not label_security:
+		label_security = Label.new()
+		label_security.name = "LabelSecurity"
+		label_security.text = "Aman: 50%"
+		var sec_chip := PanelContainer.new()
+		sec_chip.add_theme_stylebox_override("panel", chip_style)
+		var sch := HBoxContainer.new()
+		sch.add_theme_constant_override("separation", 5)
+		sch.add_child(S1VisualBuilder.StatIcon.new("security"))
+		sch.add_child(label_security)
+		sec_chip.add_child(sch)
+		top_hbox.add_child(sec_chip)
+		var pop_chip := label_popularity.get_parent().get_parent()
+		if pop_chip and pop_chip.get_parent() == top_hbox:
+			top_hbox.move_child(sec_chip, pop_chip.get_index() + 1)
+
+func _setup_utility_buttons() -> void:
+	var palette := get_node_or_null("BottomPalette") as PanelContainer
+	var hbox := get_node_or_null("BottomPalette/HBox") as HBoxContainer
+	if not hbox:
+		return
+
+	# Bungkus HBox dengan ScrollContainer agar 19 tombol muat rapi di 1280x720
+	if palette and hbox.get_parent() == palette:
+		var scroll := ScrollContainer.new()
+		scroll.name = "ToolScroll"
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.custom_minimum_size = Vector2(1180, 54)
+		palette.remove_child(hbox)
+		scroll.add_child(hbox)
+		palette.add_child(scroll)
+
+	btn_power_cable = Button.new()
+	btn_power_cable.name = "BtnPowerCable"
+	btn_power_cable.text = "Kabel\nRp 1.000"
+	btn_power_cable.custom_minimum_size = Vector2(76, 44)
+	btn_power_cable.add_theme_font_size_override("font_size", 11)
+	hbox.add_child(btn_power_cable)
+	hbox.move_child(btn_power_cable, btn_bulldozer.get_index())
+
+	btn_water_pipe = Button.new()
+	btn_water_pipe.name = "BtnWaterPipe"
+	btn_water_pipe.text = "Pipa\nRp 1.000"
+	btn_water_pipe.custom_minimum_size = Vector2(76, 44)
+	btn_water_pipe.add_theme_font_size_override("font_size", 11)
+	hbox.add_child(btn_water_pipe)
+	hbox.move_child(btn_water_pipe, btn_bulldozer.get_index())
+
+	var pub_specs := [
+		{"name": "BtnSchool", "label": "Sekolah", "price_txt": "Rp75rb", "mode": CityManager.ToolMode.SCHOOL, "tile_type": CityData.TileType.SCHOOL, "cost": CityData.COST_SCHOOL},
+		{"name": "BtnClinic", "label": "Puskesmas", "price_txt": "Rp60rb", "mode": CityManager.ToolMode.CLINIC, "tile_type": CityData.TileType.CLINIC, "cost": CityData.COST_CLINIC},
+		{"name": "BtnHospital", "label": "Rumah Sakit", "price_txt": "Rp250rb", "mode": CityManager.ToolMode.HOSPITAL, "tile_type": CityData.TileType.HOSPITAL, "cost": CityData.COST_HOSPITAL},
+		{"name": "BtnPolice", "label": "Polisi", "price_txt": "Rp100rb", "mode": CityManager.ToolMode.POLICE, "tile_type": CityData.TileType.POLICE, "cost": CityData.COST_POLICE},
+		{"name": "BtnMilitary", "label": "Markas TNI", "price_txt": "Rp200rb", "mode": CityManager.ToolMode.MILITARY, "tile_type": CityData.TileType.MILITARY, "cost": CityData.COST_MILITARY},
+		{"name": "BtnMayorOffice", "label": "Ktr Walikota", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.MAYOR_OFFICE, "tile_type": CityData.TileType.MAYOR_OFFICE, "cost": CityData.COST_MAYOR_OFFICE},
+		{"name": "BtnFireStation", "label": "Damkar", "price_txt": "Rp120rb", "mode": CityManager.ToolMode.FIRE_STATION, "tile_type": CityData.TileType.FIRE_STATION, "cost": CityData.COST_FIRE_STATION}
+	]
+	public_tool_defs.clear()
+	for spec in pub_specs:
+		var b := Button.new()
+		b.name = spec["name"]
+		b.text = "%s\n%s" % [spec["label"], spec["price_txt"]]
+		b.custom_minimum_size = Vector2(96, 44)
+		b.add_theme_font_size_override("font_size", 10)
+		var m_val: CityManager.ToolMode = spec["mode"]
+		b.pressed.connect(func(): _select_tool(m_val))
+		hbox.add_child(b)
+		hbox.move_child(b, btn_bulldozer.get_index())
+		tool_buttons[m_val] = b
+		public_tool_defs.append({
+			"btn": b,
+			"label": spec["label"],
+			"price_txt": spec["price_txt"],
+			"tile_type": spec["tile_type"],
+			"cost": spec["cost"]
+		})
+
+	btn_underground = Button.new()
+	btn_underground.name = "BtnUnderground"
+	btn_underground.toggle_mode = true
+	btn_underground.text = "Bawah\nTanah"
+	btn_underground.custom_minimum_size = Vector2(74, 44)
+	btn_underground.add_theme_font_size_override("font_size", 11)
+	UIThemeHelper.apply_btn_secondary(btn_underground, 44.0)
+	btn_underground.toggled.connect(func(pressed_on: bool):
+		AudioManager.play_sfx(self, "click")
+		if pressed_on:
+			UIThemeHelper.apply_btn_primary(btn_underground, 44.0)
+		else:
+			UIThemeHelper.apply_btn_secondary(btn_underground, 44.0)
+		if city_manager:
+			city_manager.set_underground_view(pressed_on)
+	)
+	hbox.add_child(btn_underground)
 
 func _format_number(val: int) -> String:
 	var s := str(val)
@@ -531,20 +744,23 @@ func _setup_bubble_overlay() -> void:
 	move_child(bubble_layer, 0)
 
 	var bg_style := StyleBoxFlat.new()
-	bg_style.bg_color = Color(0.08, 0.10, 0.14, 0.86)
-	bg_style.border_width_left = 1
-	bg_style.border_width_top = 1
-	bg_style.border_width_right = 1
-	bg_style.border_width_bottom = 1
-	bg_style.border_color = Color(0.35, 0.42, 0.56, 0.9)
-	bg_style.corner_radius_top_left = 8
-	bg_style.corner_radius_top_right = 8
-	bg_style.corner_radius_bottom_right = 8
-	bg_style.corner_radius_bottom_left = 8
-	bg_style.content_margin_left = 9.0
-	bg_style.content_margin_top = 5.0
-	bg_style.content_margin_right = 9.0
-	bg_style.content_margin_bottom = 5.0
+	bg_style.bg_color = Color(0.08, 0.10, 0.16, 0.92)
+	bg_style.border_width_left = 2
+	bg_style.border_width_top = 2
+	bg_style.border_width_right = 2
+	bg_style.border_width_bottom = 2
+	bg_style.border_color = Color(0.95, 0.78, 0.25, 0.95)
+	bg_style.corner_radius_top_left = 14
+	bg_style.corner_radius_top_right = 14
+	bg_style.corner_radius_bottom_right = 14
+	bg_style.corner_radius_bottom_left = 14
+	bg_style.shadow_color = Color(0.0, 0.0, 0.0, 0.40)
+	bg_style.shadow_size = 5
+	bg_style.shadow_offset = Vector2(0.0, 3.0)
+	bg_style.content_margin_left = 12.0
+	bg_style.content_margin_top = 7.0
+	bg_style.content_margin_right = 12.0
+	bg_style.content_margin_bottom = 7.0
 
 	for i in range(MAX_BUBBLES):
 		var panel := PanelContainer.new()
@@ -922,6 +1138,7 @@ func _setup_pause_and_settings() -> void:
 			"sfx_volume": sl_sfx.value,
 			"muted": chk_mute.button_pressed
 		})
+		AudioManager.play_sfx(self, "click")
 		settings_modal.visible = false
 		pause_modal.visible = true
 		_show_toast("Pengaturan disimpan.")
@@ -960,3 +1177,108 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_toggle_pause_menu()
 		get_viewport().set_input_as_handled()
+
+func _setup_touch_controls() -> void:
+	# Tombol putar kamera kiri/kanan (semi-transparan, tidak menutupi kota)
+	var rot_box := HBoxContainer.new()
+	rot_box.name = "CameraRotateBox"
+	rot_box.anchor_left = 1.0
+	rot_box.anchor_top = 1.0
+	rot_box.anchor_right = 1.0
+	rot_box.anchor_bottom = 1.0
+	rot_box.offset_left = -114.0
+	rot_box.offset_top = -126.0
+	rot_box.offset_right = -14.0
+	rot_box.offset_bottom = -82.0
+	rot_box.add_theme_constant_override("separation", 6)
+	rot_box.modulate = Color(1.0, 1.0, 1.0, 0.82)
+	add_child(rot_box)
+
+	var btn_rot_l := Button.new()
+	btn_rot_l.text = "⟲"
+	btn_rot_l.custom_minimum_size = Vector2(46, 42)
+	btn_rot_l.add_theme_font_size_override("font_size", 18)
+	btn_rot_l.pressed.connect(func():
+		AudioManager.play_sfx(self, "click")
+		if city_manager and city_manager.camera_controller:
+			city_manager.camera_controller.rotate_yaw(-30.0)
+	)
+	rot_box.add_child(btn_rot_l)
+
+	var btn_rot_r := Button.new()
+	btn_rot_r.text = "⟳"
+	btn_rot_r.custom_minimum_size = Vector2(46, 42)
+	btn_rot_r.add_theme_font_size_override("font_size", 18)
+	btn_rot_r.pressed.connect(func():
+		AudioManager.play_sfx(self, "click")
+		if city_manager and city_manager.camera_controller:
+			city_manager.camera_controller.rotate_yaw(30.0)
+	)
+	rot_box.add_child(btn_rot_r)
+
+func _input(event: InputEvent) -> void:
+	# 1 jari drag di atas tool palette = pilih tool
+	if event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		for m in tool_buttons:
+			var btn: Button = tool_buttons[m]
+			if btn and btn.visible and btn.get_global_rect().has_point(sd.position):
+				if city_manager and city_manager.current_tool != m:
+					_select_tool(m)
+				break
+
+func _setup_region_buy_modal() -> void:
+	region_buy_modal = PanelContainer.new()
+	region_buy_modal.name = "RegionBuyModal"
+	region_buy_modal.visible = false
+	region_buy_modal.set_anchors_preset(Control.PRESET_CENTER)
+	region_buy_modal.offset_left = -205.0
+	region_buy_modal.offset_top = -105.0
+	region_buy_modal.offset_right = 205.0
+	region_buy_modal.offset_bottom = 105.0
+	region_buy_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 18, 20.0, 18.0, 0.96))
+	add_child(region_buy_modal)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	region_buy_modal.add_child(vbox)
+
+	vbox.add_child(UIThemeHelper.make_panel_header("Perluas Wilayah", "money"))
+	vbox.add_child(HSeparator.new())
+
+	lbl_region_buy = Label.new()
+	lbl_region_buy.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_region_buy.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(lbl_region_buy)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 10)
+	vbox.add_child(hbox)
+
+	var btn_buy := Button.new()
+	btn_buy.text = "Beli"
+	btn_buy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_primary(btn_buy, 48.0)
+	btn_buy.pressed.connect(func():
+		region_buy_modal.visible = false
+		if city_manager:
+			city_manager.buy_region(_pending_region)
+	)
+	hbox.add_child(btn_buy)
+
+	var btn_cancel := Button.new()
+	btn_cancel.text = "Batal"
+	btn_cancel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_secondary(btn_cancel, 48.0)
+	btn_cancel.pressed.connect(func():
+		AudioManager.play_sfx(self, "click")
+		region_buy_modal.visible = false
+	)
+	hbox.add_child(btn_cancel)
+
+func _open_region_buy_dialog(reg: Vector2i, price: int) -> void:
+	_pending_region = reg
+	if lbl_region_buy:
+		lbl_region_buy.text = "Buka wilayah baru (16x16 tile)? Harga Rp %s. Lanjutkan?" % _format_number(price)
+	if region_buy_modal:
+		region_buy_modal.visible = true

@@ -7,6 +7,22 @@ extends RefCounted
 const COMPLAINT_TRAFFIC: String = "macet"
 const COMPLAINT_TRASH: String = "sampah"
 const COMPLAINT_TRAFFIC_LIGHT: String = "lampu_merah"
+const COMPLAINT_NO_SCHOOL: String = "tidak_ada_sekolah"
+const COMPLAINT_NO_HEALTH: String = "tidak_ada_berobat"
+const COMPLAINT_INSECURE: String = "tidak_aman"
+const COMPLAINT_NO_FIRE: String = "takut_kebakaran"
+const COMPLAINT_FIRE: String = "kebakaran"
+const COMPLAINT_ANGKOT_NGETEM: String = "angkot_ngetem"
+const COMPLAINT_PUNGLI: String = "pungli"
+const COMPLAINT_POLLUTION: String = "polusi"
+const COMPLAINT_FLOOD: String = "banjir"
+const COMPLAINT_BLACKOUT: String = "mati_listrik"
+const COMPLAINT_DIRTY_WATER: String = "air_kotor"
+const COMPLAINT_BAD_ROAD: String = "jalan_rusak"
+const COMPLAINT_INFLATION: String = "harga_naik"
+const COMPLAINT_UNEMPLOYMENT: String = "pengangguran"
+const COMPLAINT_NO_TRANSIT: String = "tidak_ada_transportasi"
+const COMPLAINT_AIRPORT_NOISE: String = "kebisingan_bandara"
 
 # Variasi kalimat bubble chat untuk 3 keluhan utama
 const COMPLAINT_QUOTES = {
@@ -27,6 +43,59 @@ const COMPLAINT_QUOTES = {
 		"persimpangan ini ruwet banget, harusnya ada petugas atau durasi lampu disesuaikan",
 		"antre lampu merah sampai 4 kali siklus baru bisa nyeberang, capek betul",
 		"durasi hijaunya cuma 10 detik tapi merahnya 120 detik, nggak seimbang!"
+	],
+	COMPLAINT_NO_SCHOOL: [
+		"tidak ada sekolah di kota ini, anak-anak harus sekolah ke kota sebelah",
+		"warga butuh Sekolah biar anak-anak bisa belajar dekat rumah, Pak Wali"
+	],
+	COMPLAINT_NO_HEALTH: [
+		"tidak ada tempat berobat, kalau sakit bingung mau periksa ke mana",
+		"tolong bangun Puskesmas atau Rumah Sakit, warga butuh layanan kesehatan"
+	],
+	COMPLAINT_INSECURE: [
+		"tidak aman, sering ada pencurian di lingkungan perumahan malam hari",
+		"warga resah karena tidak aman dan sering ada pencurian, butuh Kantor Polisi"
+	],
+	COMPLAINT_NO_FIRE: [
+		"takut kebakaran, tidak ada damkar kalau sewaktu-waktu ada api",
+		"kota makin ramai tapi belum ada Damkar, warga takut kebakaran besar"
+	],
+	COMPLAINT_FIRE: [
+		"Kebakaran! Tolong! Ada bangunan terbakar, segera padamkan!"
+	],
+	COMPLAINT_ANGKOT_NGETEM: [
+		"angkotnya ngetem terus di tengah jalan, bikin macet panjang!",
+		"butuh Halte Angkot biar angkot nggak ngetem sembarangan"
+	],
+	COMPLAINT_PUNGLI: [
+		"ada pungutan liar di persimpangan, tolong ditertibkan Pak Wali!"
+	],
+	COMPLAINT_POLLUTION: [
+		"asap pabrik bikin sesak napas anak-anak, tolong dikendalikan"
+	],
+	COMPLAINT_FLOOD: [
+		"hujan sebentar air selokan langsung meluap ke jalan, butuh normalisasi"
+	],
+	COMPLAINT_BLACKOUT: [
+		"listrik sering padam mendadak, warga & toko terganggu"
+	],
+	COMPLAINT_DIRTY_WATER: [
+		"air keran keruh dan berbau, tolong cek jaringan pipa air"
+	],
+	COMPLAINT_BAD_ROAD: [
+		"banyak jalan berlubang, rawan pengendara motor jatuh"
+	],
+	COMPLAINT_INFLATION: [
+		"harga kebutuhan pokok naik, tolong adakan operasi pasar"
+	],
+	COMPLAINT_UNEMPLOYMENT: [
+		"banyak warga belum dapat kerja, butuh zona komersial atau industri baru"
+	],
+	COMPLAINT_NO_TRANSIT: [
+		"tidak ada transportasi umum yang layak, warga susah bepergian"
+	],
+	COMPLAINT_AIRPORT_NOISE: [
+		"berisik, pesawat lewat terus dekat rumah warga!"
 	]
 }
 
@@ -67,6 +136,141 @@ const COMPLAINT_SOLUTIONS = {
 			"pop_gain": -3,
 			"desc": "Biarkan sementara waktu. Popularitas -3."
 		}
+	],
+	COMPLAINT_NO_SCHOOL: [
+		{
+			"title": "Subsidi Transportasi Sekolah Sementara",
+			"cost": 10000,
+			"pop_gain": 5,
+			"desc": "Bantu anak sekolah sementara sambil menyiapkan Sekolah. Popularitas +5."
+		},
+		{
+			"title": "Abaikan Keluhan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Tunda pembangunan fasilitas pendidikan. Popularitas -5."
+		}
+	],
+	COMPLAINT_NO_HEALTH: [
+		{
+			"title": "Kirim Layanan Klinik Keliling",
+			"cost": 10000,
+			"pop_gain": 5,
+			"desc": "Layani warga sementara sambil menyiapkan Puskesmas. Popularitas +5."
+		},
+		{
+			"title": "Abaikan Keluhan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Biarkan tanpa layanan kesehatan. Popularitas -5."
+		}
+	],
+	COMPLAINT_INSECURE: [
+		{
+			"title": "Tingkatkan Patroli Siskamling",
+			"cost": 8000,
+			"pop_gain": 5,
+			"desc": "Amankan lingkungan sementara dan naikkan Keamanan. Popularitas +5."
+		},
+		{
+			"title": "Abaikan Keluhan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Keamanan terus menurun. Popularitas -5."
+		}
+	],
+	COMPLAINT_NO_FIRE: [
+		{
+			"title": "Bagikan Alat Pemadam Ringan",
+			"cost": 8000,
+			"pop_gain": 5,
+			"desc": "Langkah darurat pencegahan kebakaran. Popularitas +5."
+		},
+		{
+			"title": "Abaikan Keluhan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Warga tetap cemas risiko kebakaran. Popularitas -5."
+		}
+	],
+	COMPLAINT_FIRE: [
+		{
+			"title": "Kerahkan Bantuan Darurat Pemadam",
+			"cost": 5000,
+			"pop_gain": 5,
+			"desc": "Bantu evakuasi & percepat penanganan kebakaran. Popularitas +5."
+		},
+		{
+			"title": "Abaikan Laporan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Warga kecewa lambatnya respons darurat. Popularitas -5."
+		}
+	],
+	COMPLAINT_ANGKOT_NGETEM: [
+		{
+			"title": "Penertiban Angkot Ngetem",
+			"cost": 25000,
+			"pop_gain": 5,
+			"desc": "Tertibkan angkot yang ngetem sembarangan. Popularitas +5."
+		},
+		{
+			"title": "Abaikan Keluhan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Kemacetan berlanjut. Popularitas -5."
+		}
+	],
+	COMPLAINT_PUNGLI: [
+		{
+			"title": "Razia Pungli",
+			"cost": 50000,
+			"pop_gain": 5,
+			"integ_gain": 5,
+			"desc": "Berantas pungli di lapangan. Popularitas +5, Integritas +5."
+		},
+		{
+			"title": "Abaikan Laporan",
+			"cost": 0,
+			"pop_gain": -5,
+			"desc": "Pungli dibiarkan (3 bulan -> -10 Popularitas)."
+		}
+	],
+	COMPLAINT_POLLUTION: [
+		{ "title": "Pasang Filter Cerobong", "cost": 20000, "pop_gain": 5, "desc": "Kurangi asap industri. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Udara tetap tercemar. Popularitas -5." }
+	],
+	COMPLAINT_FLOOD: [
+		{ "title": "Normalisasi Selokan", "cost": 25000, "pop_gain": 5, "desc": "Lancarkan drainase kota. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Genangan berulang. Popularitas -5." }
+	],
+	COMPLAINT_BLACKOUT: [
+		{ "title": "Stabilkan Gardu Listrik", "cost": 15000, "pop_gain": 5, "desc": "Perbaiki distribusi daya. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Warga terganggu. Popularitas -5." }
+	],
+	COMPLAINT_DIRTY_WATER: [
+		{ "title": "Kuras Pipa & Filter Air", "cost": 15000, "pop_gain": 5, "desc": "Bersihkan saluran air bersih. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Air tetap keruh. Popularitas -5." }
+	],
+	COMPLAINT_BAD_ROAD: [
+		{ "title": "Tambal Aspal Jalan", "cost": 12000, "pop_gain": 5, "desc": "Perbaiki jalan berlubang. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Jalan tetap rusak. Popularitas -5." }
+	],
+	COMPLAINT_INFLATION: [
+		{ "title": "Operasi Pasar Murah", "cost": 20000, "pop_gain": 5, "desc": "Stabilkan harga pangan warga. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Harga tetap tinggi. Popularitas -5." }
+	],
+	COMPLAINT_UNEMPLOYMENT: [
+		{ "title": "Pelatihan Kerja Warga", "cost": 15000, "pop_gain": 5, "desc": "Bantu pencari kerja. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Pengangguran meningkat. Popularitas -5." }
+	],
+	COMPLAINT_NO_TRANSIT: [
+		{ "title": "Subsidi Angkutan Sementara", "cost": 15000, "pop_gain": 5, "desc": "Bantu mobilitas warga. Popularitas +5." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Warga kesulitan transportasi. Popularitas -5." }
+	],
+	COMPLAINT_AIRPORT_NOISE: [
+		{ "title": "Pasang Peredam Suara Warga", "cost": 30000, "pop_gain": 3, "desc": "Redam kebisingan pesawat. Popularitas +3." },
+		{ "title": "Abaikan Keluhan", "cost": 0, "pop_gain": -5, "desc": "Kebisingan berlanjut. Popularitas -5." }
 	]
 }
 
