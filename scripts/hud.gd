@@ -307,15 +307,6 @@ func _select_tool(mode: CityManager.ToolMode) -> void:
 	if btn_rotate_preview and city_manager:
 		btn_rotate_preview.visible = city_manager._is_rotatable_tool(mode) or (city_manager.moving_from_pos != Vector2i(-1, -1))
 
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		if building_info_modal and building_info_modal.visible:
-			building_info_modal.visible = false
-		elif stats_modal and stats_modal.visible:
-			_close_stats_modal()
-		elif category_popup and category_popup.visible:
-			_close_category_popup()
-
 func _select_speed(speed: float) -> void:
 	if city_manager:
 		city_manager.set_game_speed(speed)
@@ -1856,6 +1847,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			townhall_modal.visible = false
 		elif citizen_modal and citizen_modal.visible:
 			citizen_modal.visible = false
+		elif building_info_modal and building_info_modal.visible:
+			building_info_modal.visible = false
+		elif stats_modal and stats_modal.visible:
+			_close_stats_modal()
+		elif event_modal and event_modal.visible:
+			event_modal.visible = false
+		elif category_popup and category_popup.visible:
+			_close_category_popup()
 		else:
 			_toggle_pause_menu()
 		get_viewport().set_input_as_handled()
