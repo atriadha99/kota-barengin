@@ -630,9 +630,9 @@ func has_working_airport() -> bool:
 	return count_public_type(TileType.RUNWAY) >= 20 and has_working_public(TileType.AIRPORT_TERMINAL) and airplane_count >= 1
 
 func has_adjacent_type(cx: int, cy: int, target_type: int) -> bool:
-	for dir in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var nx := cx + dir.x
-		var ny := cy + dir.y
+	for dir: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var nx: int = cx + dir.x
+		var ny: int = cy + dir.y
 		if is_valid_tile(nx, ny) and get_tile(nx, ny).get("type", TileType.EMPTY) == target_type:
 			return true
 	return false

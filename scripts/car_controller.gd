@@ -237,7 +237,7 @@ func _process_transit(delta: float, road_tiles: Array) -> void:
 
 		var p1 := CityData.tile_to_world_pos(cur.x, cur.y)
 		var p2 := CityData.tile_to_world_pos(nxt.x, nxt.y)
-		var pos := p1.lerp(p2, tv["progress"])
+		var pos: Vector3 = p1.lerp(p2, float(tv["progress"]))
 		pos.y = 0.05
 		n.global_position = pos
 		n.visible = true
@@ -248,8 +248,8 @@ func _process_transit(delta: float, road_tiles: Array) -> void:
 func _pick_next_from_pool(from_tile: Vector2i, prev_dir: Vector2i, pool: Array) -> Vector2i:
 	var opts: Array[Vector2i] = []
 	var non_rev: Array[Vector2i] = []
-	for dir in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var nxt := from_tile + dir
+	for dir: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var nxt: Vector2i = from_tile + dir
 		if nxt in pool:
 			opts.append(nxt)
 			if prev_dir != Vector2i.ZERO and dir != -prev_dir:
