@@ -29,8 +29,19 @@ func setup(world_env: WorldEnvironment, dir_light: DirectionalLight3D, start_jam
 	_dir_light = dir_light
 	waktu_jam = fmod(maxf(0.0, start_jam), 24.0)
 	cuaca_saat_ini = start_cuaca if start_cuaca in ["cerah", "berawan", "hujan"] else "cerah"
-	if _world_env and _world_env.environment and _world_env.environment.sky:
-		_sky_mat = _world_env.environment.sky.sky_material as ProceduralSkyMaterial
+	if _world_env and _world_env.environment:
+		var env: Environment = _world_env.environment
+		if env.sky:
+			_sky_mat = env.sky.sky_material as ProceduralSkyMaterial
+		env.fog_enabled = true
+		env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
+		env.fog_density = 0.0075
+		env.fog_sky_affect = 0.35
+		env.ambient_light_energy = 0.85
+	if _dir_light:
+		_dir_light.shadow_enabled = true
+		_dir_light.shadow_blur = 2.2
+		_dir_light.shadow_bias = 0.03
 	_init_rain_pool()
 	is_night = (waktu_jam >= 19.0 or waktu_jam < 5.0)
 	_apply_lighting(1.0)
@@ -132,6 +143,8 @@ func _apply_lighting(t: float) -> void:
 		_sky_mat.sky_horizon_color = _cur_sky_hor
 	if _world_env and _world_env.environment:
 		_world_env.environment.ambient_light_sky_contribution = _cur_amb
+		_world_env.environment.fog_light_color = _cur_sky_hor
+		_world_env.environment.ambient_light_color = _cur_sky_hor.lerp(Color(0.62, 0.66, 0.74), 0.5)
 	if _dir_light:
 		_dir_light.light_color = _cur_light_col
 		_dir_light.light_energy = _cur_light_energy

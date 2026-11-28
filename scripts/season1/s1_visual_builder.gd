@@ -101,6 +101,30 @@ static func create_house(variant: int, is_player_house: bool = false) -> Node3D:
 	door.position = Vector3(0.0, 0.44, 1.02)
 	house.add_child(door)
 
+	# Jendela gelap sedikit mengkilap (shared mesh & material)
+	var win_mat: StandardMaterial3D = _get_mat("window_glass", Color(0.14, 0.20, 0.28), 0.16)
+	win_mat.metallic = 0.15
+	for wx in [-0.62, 0.62]:
+		var win := MeshInstance3D.new()
+		win.mesh = _get_box("house_window", Vector3(0.34, 0.34, 0.06))
+		win.material_override = win_mat
+		win.position = Vector3(wx, 0.82, 1.01)
+		house.add_child(win)
+
+	# Cerobong atau antena kecil di atap beberapa rumah
+	if variant % 3 == 0:
+		var chim := MeshInstance3D.new()
+		chim.mesh = _get_box("house_chimney", Vector3(0.22, 0.45, 0.22))
+		chim.material_override = _get_mat("chimney_brick", Color(0.55, 0.30, 0.24))
+		chim.position = Vector3(0.65, 2.08, -0.35)
+		house.add_child(chim)
+	elif variant % 3 == 1:
+		var ant := MeshInstance3D.new()
+		ant.mesh = _get_box("house_antenna", Vector3(0.04, 0.55, 0.04))
+		ant.material_override = _get_mat("iron_dark", Color(0.22, 0.24, 0.28))
+		ant.position = Vector3(-0.55, 2.15, -0.25)
+		house.add_child(ant)
+
 	# Teras kecil + tiang untuk varian 1 & 3
 	if variant % 2 == 1:
 		var porch := MeshInstance3D.new()
@@ -175,13 +199,28 @@ static func create_street_lamp() -> Node3D:
 
 	var bulb := MeshInstance3D.new()
 	bulb.mesh = _get_sphere("lamp_bulb", 0.14)
-	bulb.material_override = _get_mat("lamp_glow", Color(1.0, 0.92, 0.55), 0.3, 1.2)
+	bulb.material_override = _get_mat("lamp_glow", Color(1.0, 0.90, 0.58), 0.3, 0.85)
 	bulb.position = Vector3(0.0, 2.25, 0.0)
 	lamp.add_child(bulb)
 	return lamp
 
-## Warung kecil visual (atap biru-putih + papan "WARUNG")
+static func _enable_shadows_recursive(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	for child in node.get_children():
+		_enable_shadows_recursive(child)
+
+## Warung kecil visual (model 3D res://assets/models/warung.glb + fallback)
 static func create_warung() -> Node3D:
+	const WARUNG_GLB: String = "res://assets/models/warung.glb"
+	if ResourceLoader.exists(WARUNG_GLB):
+		var scene_res: PackedScene = load(WARUNG_GLB) as PackedScene
+		if scene_res:
+			var model: Node3D = scene_res.instantiate() as Node3D
+			if model:
+				_enable_shadows_recursive(model)
+				return model
 	var w := Node3D.new()
 	var body := MeshInstance3D.new()
 	body.mesh = _get_box("warung_body", Vector3(2.0, 1.3, 1.6))
@@ -229,8 +268,8 @@ static func create_trash_bin() -> Node3D:
 	tb.add_child(bin)
 	return tb
 
-## Warga low-poly bervariasi (baju, kulit, topi/kerudung, tas/ember) dengan referensi anggota badan untuk animasi jalan
-static func create_citizen_rig(seed_idx: int, is_player: bool = false) -> Dictionary:
+## Warga low-poly bervariasi (baju, kulit, tinggi, gender rambut/hijab/topi) dengan referensi anggota badan
+static func create_citizen_rig(seed_idx: int, is_player: bool = false, gender: String = "", height_scale: float = 1.0, custom_shirt: Color = Color(-1, 0, 0), custom_head: Color = Color(-1, 0, 0)) -> Dictionary:
 	var root := Node3D.new()
 
 	var shirt_list := [
@@ -249,9 +288,41 @@ static func create_citizen_rig(seed_idx: int, is_player: bool = false) -> Dictio
 
 	var sh: Array = shirt_list[0] if is_player else shirt_list[seed_idx % shirt_list.size()]
 	var sk: Array = skin_list[seed_idx % skin_list.size()]
+	var sh_mat: StandardMaterial3D = _get_mat(sh[0], sh[1])
+	if custom_shirt.r >= 0.0:
+		sh_mat = StandardMaterial3D.new()
+		sh_mat.albedo_color = custom_shirt
 
 	var body_pivot := Node3D.new()
+	body_pivot.scale = Vector3(1.0, height_scale, 1.0)
 	root.add_child(body_pivot)
+
+	# Bayangan lembut di bawah warga agar tidak terlihat melayang
+	var sh_mesh: CylinderMesh
+	if _meshes.has("cit_blob_shadow"):
+		sh_mesh = _meshes["cit_blob_shadow"] as CylinderMesh
+	else:
+		sh_mesh = CylinderMesh.new()
+		sh_mesh.top_radius = 0.24
+		sh_mesh.bottom_radius = 0.24
+		sh_mesh.height = 0.012
+		sh_mesh.radial_segments = 10
+		_meshes["cit_blob_shadow"] = sh_mesh
+	var sh_blob_mat: StandardMaterial3D
+	if _mats.has("cit_blob_mat"):
+		sh_blob_mat = _mats["cit_blob_mat"] as StandardMaterial3D
+	else:
+		sh_blob_mat = StandardMaterial3D.new()
+		sh_blob_mat.albedo_color = Color(0.05, 0.06, 0.08, 0.32)
+		sh_blob_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		sh_blob_mat.roughness = 1.0
+		_mats["cit_blob_mat"] = sh_blob_mat
+	var blob_shadow := MeshInstance3D.new()
+	blob_shadow.mesh = sh_mesh
+	blob_shadow.material_override = sh_blob_mat
+	blob_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	blob_shadow.position = Vector3(0.0, 0.01, 0.0)
+	root.add_child(blob_shadow)
 
 	# Kaki kiri & kanan (berayun saat jalan)
 	var leg_l := MeshInstance3D.new()
@@ -269,20 +340,20 @@ static func create_citizen_rig(seed_idx: int, is_player: bool = false) -> Dictio
 	# Badan
 	var torso := MeshInstance3D.new()
 	torso.mesh = _get_box("cit_torso", Vector3(0.40, 0.50, 0.22))
-	torso.material_override = _get_mat(sh[0], sh[1])
+	torso.material_override = sh_mat
 	torso.position = Vector3(0.0, 0.71, 0.0)
 	body_pivot.add_child(torso)
 
 	# Lengan kiri & kanan (berayun berlawanan kaki)
 	var arm_l := MeshInstance3D.new()
 	arm_l.mesh = _get_box("cit_arm", Vector3(0.11, 0.42, 0.11))
-	arm_l.material_override = _get_mat(sh[0], sh[1])
+	arm_l.material_override = sh_mat
 	arm_l.position = Vector3(-0.27, 0.72, 0.0)
 	body_pivot.add_child(arm_l)
 
 	var arm_r := MeshInstance3D.new()
 	arm_r.mesh = _get_box("cit_arm", Vector3(0.11, 0.42, 0.11))
-	arm_r.material_override = _get_mat(sh[0], sh[1])
+	arm_r.material_override = sh_mat
 	arm_r.position = Vector3(0.27, 0.72, 0.0)
 	body_pivot.add_child(arm_r)
 
@@ -293,11 +364,27 @@ static func create_citizen_rig(seed_idx: int, is_player: bool = false) -> Dictio
 	head.position = Vector3(0.0, 1.12, 0.0)
 	body_pivot.add_child(head)
 
-	# Topi / Kerudung sederhana
-	if not is_player and seed_idx % 3 == 1:
+	# Model gender berbeda: perempuan (hijab / rambut panjang) vs laki-laki (topi / rambut pendek)
+	var h_col: Color = custom_head if custom_head.r >= 0.0 else Color(0.88, 0.78, 0.85)
+	var h_mat: StandardMaterial3D = StandardMaterial3D.new()
+	h_mat.albedo_color = h_col
+	if not is_player and gender == "F":
+		if seed_idx % 2 == 0:
+			var kerudung := MeshInstance3D.new()
+			kerudung.mesh = _get_box("cit_hijab", Vector3(0.32, 0.34, 0.32))
+			kerudung.material_override = h_mat
+			kerudung.position = Vector3(0.0, 1.12, -0.02)
+			body_pivot.add_child(kerudung)
+		else:
+			var hair := MeshInstance3D.new()
+			hair.mesh = _get_box("cit_long_hair", Vector3(0.32, 0.42, 0.16))
+			hair.material_override = h_mat
+			hair.position = Vector3(0.0, 1.06, -0.10)
+			body_pivot.add_child(hair)
+	elif not is_player and (gender == "M" or seed_idx % 3 == 1):
 		var cap := MeshInstance3D.new()
 		cap.mesh = _get_box("cit_cap", Vector3(0.31, 0.09, 0.31))
-		cap.material_override = _get_mat("cap_col", Color(0.25, 0.30, 0.38))
+		cap.material_override = h_mat if custom_head.r >= 0.0 else _get_mat("cap_col", Color(0.25, 0.30, 0.38))
 		cap.position = Vector3(0.0, 1.29, 0.0)
 		body_pivot.add_child(cap)
 	elif not is_player and seed_idx % 3 == 2:

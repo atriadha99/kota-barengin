@@ -3,6 +3,9 @@ extends RefCounted
 
 ## Generator visual 3D prosedural untuk tile, zona, dan bangunan low-poly (Godot 4.7)
 
+static var _shared_mats: Dictionary = {}
+static var _shared_boxes: Dictionary = {}
+
 static func create_tile_node(type: CityData.TileType, level: int = 0, zone: CityData.BuildingZone = CityData.BuildingZone.RESIDENTIAL, has_util: bool = true, variant: int = 0) -> Node3D:
 	var root := Node3D.new()
 
@@ -224,6 +227,8 @@ static func _create_residential_building(level: int, variant: int = 0) -> Node3D
 		_add_box(node, sz, Vector3(0.0, sz.y * 0.5, 0.0), wall_color)
 		_add_prism_roof(node, Vector3(sz.x + 0.12, 0.42, sz.z + 0.12), Vector3(0.0, sz.y + 0.21, 0.0), roof_color)
 		_add_box(node, Vector3(0.24, 0.38, 0.05), Vector3(0.0, 0.19, sz.z * 0.5 + 0.01), Color(0.42, 0.26, 0.16))
+		_add_box(node, Vector3(0.22, 0.22, 0.04), Vector3(-0.34, 0.42, sz.z * 0.5 + 0.01), Color(0.14, 0.20, 0.28))
+		_add_box(node, Vector3(0.22, 0.22, 0.04), Vector3(0.34, 0.42, sz.z * 0.5 + 0.01), Color(0.14, 0.20, 0.28))
 	elif level == 2:
 		_add_box(node, Vector3(1.35, 1.45, 1.25), Vector3(0.0, 0.725, 0.0), wall_color)
 		if v == 0:
@@ -329,18 +334,20 @@ static func _create_water_tower_mesh() -> Node3D:
 	var legs_box := BoxMesh.new()
 	legs_box.size = Vector3(0.8, 1.4, 0.8)
 	var legs_mat := StandardMaterial3D.new()
-	legs_mat.albedo_color = Color(0.6, 0.6, 0.65)
+	legs_mat.albedo_color = Color(0.55, 0.56, 0.60)
 	legs.mesh = legs_box
+	legs.material_override = legs_mat
 	legs.position = Vector3(0.0, 0.7, 0.0)
 	node.add_child(legs)
 
-	# Tangki air bulat / kubus biru di atas
+	# Tangki air bulat / kubus biru lembut di atas
 	var tank := MeshInstance3D.new()
 	var tank_box := BoxMesh.new()
 	tank_box.size = Vector3(1.2, 0.9, 1.2)
 	var tank_mat := StandardMaterial3D.new()
-	tank_mat.albedo_color = Color(0.2, 0.5, 0.9) # Biru air
+	tank_mat.albedo_color = Color(0.26, 0.52, 0.78) # Biru air lembut
 	tank.mesh = tank_box
+	tank.material_override = tank_mat
 	tank.position = Vector3(0.0, 1.7, 0.0)
 	node.add_child(tank)
 	return node
@@ -354,7 +361,7 @@ static func _create_park_mesh() -> Node3D:
 	var grass_box := BoxMesh.new()
 	grass_box.size = Vector3(1.9, 0.04, 1.9)
 	var grass_mat := StandardMaterial3D.new()
-	grass_mat.albedo_color = Color(0.28, 0.65, 0.25)
+	grass_mat.albedo_color = Color(0.26, 0.52, 0.24)
 	grass_mat.roughness = 0.95
 	grass.mesh = grass_box
 	grass.material_override = grass_mat
@@ -661,18 +668,32 @@ static func _create_townhall_mesh() -> Node3D:
 
 	return node
 
-static func _add_box(parent: Node3D, size: Vector3, pos: Vector3, color: Color, emissive: bool = false) -> MeshInstance3D:
-	var m := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
+static func _get_shared_mat(color: Color, emissive: bool = false) -> StandardMaterial3D:
+	var key: String = "%s_%s" % [color.to_html(), str(emissive)]
+	if _shared_mats.has(key):
+		return _shared_mats[key] as StandardMaterial3D
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
+	mat.roughness = 0.18 if (color.r < 0.25 and color.b > color.r and not emissive) else 0.85
 	if emissive:
 		mat.emission_enabled = true
 		mat.emission = color
 		mat.emission_energy_multiplier = 0.8
+	_shared_mats[key] = mat
+	return mat
+
+static func _add_box(parent: Node3D, size: Vector3, pos: Vector3, color: Color, emissive: bool = false) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	var bkey: String = "%.3f_%.3f_%.3f" % [size.x, size.y, size.z]
+	var box: BoxMesh
+	if _shared_boxes.has(bkey):
+		box = _shared_boxes[bkey] as BoxMesh
+	else:
+		box = BoxMesh.new()
+		box.size = size
+		_shared_boxes[bkey] = box
 	m.mesh = box
-	m.material_override = mat
+	m.material_override = _get_shared_mat(color, emissive)
 	m.position = pos
 	parent.add_child(m)
 	return m
@@ -681,10 +702,8 @@ static func _add_prism_roof(parent: Node3D, size: Vector3, pos: Vector3, color: 
 	var m := MeshInstance3D.new()
 	var prism := PrismMesh.new()
 	prism.size = size
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
 	m.mesh = prism
-	m.material_override = mat
+	m.material_override = _get_shared_mat(color, false)
 	m.position = pos
 	parent.add_child(m)
 	return m

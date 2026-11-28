@@ -258,7 +258,7 @@ func _process_transit(delta: float, road_tiles: Array) -> void:
 		n.visible = true
 		var d := (p2 - p1).normalized()
 		if d.length_squared() > 0.001:
-			n.rotation.y = atan2(-d.x, -d.z)
+			n.rotation.y = lerp_angle(n.rotation.y, atan2(-d.x, -d.z), clampf(delta * 10.0, 0.0, 1.0))
 
 func _pick_next_from_pool(from_tile: Vector2i, prev_dir: Vector2i, pool: Array) -> Vector2i:
 	var opts: Array[Vector2i] = []

@@ -141,6 +141,10 @@ var security: float = 50.0 # 0 - 100 (mulai 50)
 var health: float = 70.0 # 0 - 100 (mulai 70)
 var fire_cooldown_months: int = 0 # Maksimal 1x per 12 bulan game
 var active_fire: Dictionary = {} # { "pos": Vector2i, "state": "burning"|"damaged_light"|"damaged_heavy", "months_left": int }
+var insiden_aktif: Dictionary = {} # Insiden aktif (kebakaran, kemalingan, kerusuhan, demo)
+var unit_status: Array = [] # Daftar status unit darurat tersimpan
+var theft_cooldown_months: int = 0
+var riot_cooldown_months: int = 0
 var wide_roads: Dictionary = {} # Vector2i -> true
 var flyovers: Dictionary = {} # Vector2i -> true
 var bus_kopaja_count: int = 0
@@ -299,6 +303,10 @@ func reset_grid() -> void:
 	health = 70.0
 	fire_cooldown_months = 0
 	active_fire.clear()
+	insiden_aktif.clear()
+	unit_status.clear()
+	theft_cooldown_months = 0
+	riot_cooldown_months = 0
 	wide_roads.clear()
 	flyovers.clear()
 	bus_kopaja_count = 0

@@ -87,6 +87,82 @@ var s1_photo_helper: PhotoModeHelper = null
 var s1_photo_paused: bool = false
 var s1_ambient: AmbientLifeHelper = null
 
+var posisi_pemain: Vector3 = Vector3(0.6, 0.0, 1.2)
+var warga_ditemui: Array = []
+var pernah_adegan_barista: bool = false
+var _player_rig: Dictionary = {}
+var _player_node: Node3D = null
+var _player_phase: float = 0.0
+var _player_colliders: Array = []
+var _s1_trees: Array[Node3D] = []
+var _world_bound: float = 6.0
+var _warung_pos: Vector3 = Vector3(3.2, 0.0, -0.4)
+var _has_warung: bool = false
+var _joystick: S1SimpleJoystick = null
+var _tap_down_pos: Vector2 = Vector2.ZERO
+var _tap_active: bool = false
+var villager_modal: PanelContainer = null
+var lbl_vm_title: Label = null
+var lbl_vm_info: Label = null
+var _barista_scene_active: bool = false
+var _barista_skipped: bool = false
+var _barista_overlay: Control = null
+
+class S1SimpleJoystick extends Control:
+	var joy_vec: Vector2 = Vector2.ZERO
+	var _touch_idx: int = -1
+	var _center: Vector2 = Vector2(55.0, 55.0)
+	var _radius: float = 46.0
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(110.0, 110.0)
+		size = Vector2(110.0, 110.0)
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventScreenTouch:
+			var st: InputEventScreenTouch = event as InputEventScreenTouch
+			if st.pressed and _touch_idx == -1:
+				_touch_idx = st.index
+				_update_knob(st.position)
+				accept_event()
+			elif not st.pressed and st.index == _touch_idx:
+				_touch_idx = -1
+				joy_vec = Vector2.ZERO
+				queue_redraw()
+				accept_event()
+		elif event is InputEventScreenDrag:
+			var sd: InputEventScreenDrag = event as InputEventScreenDrag
+			if sd.index == _touch_idx:
+				_update_knob(sd.position)
+				accept_event()
+		elif event is InputEventMouseButton:
+			var mb: InputEventMouseButton = event as InputEventMouseButton
+			if mb.button_index == MOUSE_BUTTON_LEFT:
+				if mb.pressed:
+					_touch_idx = 0
+					_update_knob(mb.position)
+				else:
+					_touch_idx = -1
+					joy_vec = Vector2.ZERO
+					queue_redraw()
+				accept_event()
+		elif event is InputEventMouseMotion and _touch_idx == 0:
+			var mm: InputEventMouseMotion = event as InputEventMouseMotion
+			_update_knob(mm.position)
+			accept_event()
+
+	func _update_knob(pos: Vector2) -> void:
+		var delta_v: Vector2 = pos - _center
+		if delta_v.length() > _radius:
+			delta_v = delta_v.normalized() * _radius
+		joy_vec = delta_v / _radius
+		queue_redraw()
+
+	func _draw() -> void:
+		draw_circle(_center, _radius, Color(0.10, 0.12, 0.18, 0.65))
+		draw_arc(_center, _radius, 0.0, TAU, 24, Color(0.95, 0.80, 0.28, 0.80), 2.0)
+		draw_circle(_center + joy_vec * (_radius * 0.65), 18.0, Color(0.96, 0.82, 0.30, 0.90))
+
 func _ready() -> void:
 	_build_ui()
 	if SaveManager.s1_load_on_start:
@@ -127,18 +203,26 @@ func _process(delta: float) -> void:
 					s1_weather_icon.icon_type = ic
 					s1_weather_icon.queue_redraw()
 	var move := Vector2.ZERO
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		move.x -= 1.0
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		move.x += 1.0
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		move.y -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		move.y += 1.0
-	if move != Vector2.ZERO:
-		_update_camera(move.normalized() * 10.0 * delta)
+	if not _barista_scene_active and hud_root and hud_root.visible:
+		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+			move.x -= 1.0
+		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+			move.x += 1.0
+		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+			move.y -= 1.0
+		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+			move.y += 1.0
+		if _joystick and _joystick.joy_vec.length() > 0.1:
+			move += _joystick.joy_vec
+	if move != Vector2.ZERO and _player_node and is_instance_valid(_player_node):
+		_move_player(move.normalized(), delta)
+		_cam_target = _cam_target.lerp(Vector3(_player_node.position.x, 0.0, _player_node.position.z), clampf(delta * 5.0, 0.0, 1.0))
+		_update_camera(Vector2.ZERO)
+	elif not _barista_scene_active and _player_node and is_instance_valid(_player_node):
+		_cam_target = _cam_target.lerp(Vector3(_player_node.position.x, 0.0, _player_node.position.z), clampf(delta * 3.5, 0.0, 1.0))
+		_update_camera(Vector2.ZERO)
 
-	# Animasi jalan sederhana untuk warga kampung (bobbing + ayun kaki/lengan)
+	# Animasi jalan sederhana untuk warga kampung + bubble chat jarak dekat
 	for v in _villagers:
 		var rig: Dictionary = v["rig"]
 		var root: Node3D = rig["root"]
@@ -149,10 +233,12 @@ func _process(delta: float) -> void:
 		root.position.x += dir * spd * delta
 		if root.position.x > float(v["end_x"]):
 			v["dir"] = -1.0
-			root.rotation.y = -PI * 0.5
+			v["target_rot"] = -PI * 0.5
 		elif root.position.x < float(v["start_x"]):
 			v["dir"] = 1.0
-			root.rotation.y = PI * 0.5
+			v["target_rot"] = PI * 0.5
+		var t_rot: float = float(v.get("target_rot", PI * 0.5 if dir > 0.0 else -PI * 0.5))
+		root.rotation.y = lerp_angle(root.rotation.y, t_rot, clampf(delta * 6.0, 0.0, 1.0))
 
 		v["phase"] = float(v["phase"]) + delta * spd * 6.5
 		var ph: float = float(v["phase"])
@@ -163,8 +249,33 @@ func _process(delta: float) -> void:
 		(rig["arm_l"] as MeshInstance3D).rotation.x = -swing * 0.8
 		(rig["arm_r"] as MeshInstance3D).rotation.x = swing * 0.8
 
-	# Kedip pelan jika Kesehatan kritis (< 20) & timer toast
+		# Cek jarak ke pemain untuk bubble chat & catat warga ditemui
+		v["cooldown"] = maxf(0.0, float(v.get("cooldown", 0.0)) - delta)
+		var b_lbl: Label3D = v.get("bubble", null)
+		if _player_node and is_instance_valid(_player_node) and b_lbl and is_instance_valid(b_lbl):
+			var dist: float = _player_node.position.distance_to(root.position)
+			if b_lbl.visible:
+				v["bubble_timer"] = float(v.get("bubble_timer", 0.0)) - delta
+				if float(v["bubble_timer"]) <= 0.0 or dist > 3.8:
+					b_lbl.visible = false
+			elif dist < 2.0 and float(v["cooldown"]) <= 0.0 and not _barista_scene_active:
+				var quotes: Array = v.get("quotes", [])
+				var q: String = str(quotes[randi() % quotes.size()]) if not quotes.is_empty() else "Halo!"
+				b_lbl.text = "%s: %s" % [str(v.get("name", "Warga")), q]
+				b_lbl.visible = true
+				v["bubble_timer"] = 4.0
+				v["cooldown"] = 12.0
+				var vname: String = str(v.get("name", ""))
+				if not vname.is_empty() and not (vname in warga_ditemui):
+					warga_ditemui.append(vname)
+					_refresh_hud()
+
+	# Kedip pelan jika Kesehatan kritis (< 20) & timer toast & goyang pohon lembut
 	_blink_time += delta
+	for ti in range(_s1_trees.size()):
+		var tr_n: Node3D = _s1_trees[ti]
+		if is_instance_valid(tr_n):
+			tr_n.rotation.z = sin(_blink_time * 1.1 + float(ti) * 1.3) * 0.022
 	if lbl_val_sehat and is_instance_valid(lbl_val_sehat):
 		if kesehatan < 20:
 			lbl_val_sehat.modulate = Color(1.0, 0.3, 0.3, 0.55 + 0.45 * abs(sin(_blink_time * 4.0)))
@@ -177,6 +288,14 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
+		if _barista_scene_active:
+			_barista_skipped = true
+			get_viewport().set_input_as_handled()
+			return
+		if villager_modal and villager_modal.visible:
+			villager_modal.visible = false
+			get_viewport().set_input_as_handled()
+			return
 		if settings_modal and settings_modal.visible:
 			settings_modal.visible = false
 			if pause_modal:
@@ -186,11 +305,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT or mb.button_index == MOUSE_BUTTON_RIGHT:
+		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				_tap_active = true
+				_tap_down_pos = mb.position
+				_cam_dragging = true
+			else:
+				_cam_dragging = false
+				if _tap_active and mb.position.distance_to(_tap_down_pos) < 8.0:
+					_try_click_villager(mb.position)
+				_tap_active = false
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
 			_cam_dragging = mb.pressed
-	elif event is InputEventMouseMotion and _cam_dragging:
-		var mm := event as InputEventMouseMotion
+	elif event is InputEventMouseMotion and _cam_dragging and not _barista_scene_active:
+		var mm: InputEventMouseMotion = event as InputEventMouseMotion
 		_update_camera(Vector2(-mm.relative.x * 0.025, -mm.relative.y * 0.025))
 
 func _update_camera(offset: Vector2) -> void:
@@ -221,6 +350,8 @@ func _update_camera(offset: Vector2) -> void:
 ## Bangun dunia kecil sesuai jabatan (Warga = 1, RT = 10, RW = 30, Lurah = 100, Camat = 3 Kelurahan)
 func _rebuild_world() -> void:
 	_villagers.clear()
+	_player_colliders.clear()
+	_s1_trees.clear()
 	for child in world_root.get_children():
 		world_root.remove_child(child)
 		child.queue_free()
@@ -231,12 +362,14 @@ func _rebuild_world() -> void:
 		"Ketua RW 01": ground_size = 40.0
 		"Lurah": ground_size = 64.0
 		"Camat": ground_size = 80.0
+	_world_bound = ground_size * 0.5 - 0.8
 
 	var ground := MeshInstance3D.new()
 	var g_mesh := BoxMesh.new()
 	g_mesh.size = Vector3(ground_size, 0.2, ground_size)
 	var g_mat := StandardMaterial3D.new()
-	g_mat.albedo_color = Color(0.32, 0.60, 0.28)
+	g_mat.albedo_color = Color(0.26, 0.48, 0.24)
+	g_mat.roughness = 0.92
 	ground.mesh = g_mesh
 	ground.material_override = g_mat
 	ground.position = Vector3(0.0, -0.1, 0.0)
@@ -248,7 +381,7 @@ func _rebuild_world() -> void:
 	var c_mesh := BoxMesh.new()
 	c_mesh.size = Vector3(ground_size, 0.03, road_w + 0.45)
 	var c_mat := StandardMaterial3D.new()
-	c_mat.albedo_color = Color(0.45, 0.42, 0.36)
+	c_mat.albedo_color = Color(0.48, 0.46, 0.42)
 	curb.mesh = c_mesh
 	curb.material_override = c_mat
 	curb.position = Vector3(0.0, 0.015, 2.4)
@@ -258,7 +391,7 @@ func _rebuild_world() -> void:
 	var r_mesh := BoxMesh.new()
 	r_mesh.size = Vector3(ground_size, 0.05, road_w)
 	var r_mat := StandardMaterial3D.new()
-	r_mat.albedo_color = Color(0.58, 0.45, 0.30) if jabatan == "Warga" else Color(0.34, 0.34, 0.37)
+	r_mat.albedo_color = Color(0.48, 0.39, 0.28) if jabatan == "Warga" else Color(0.32, 0.33, 0.36)
 	road.mesh = r_mesh
 	road.material_override = r_mat
 	road.position = Vector3(0.0, 0.025, 2.4)
@@ -268,6 +401,7 @@ func _rebuild_world() -> void:
 		var h := S1VisualBuilder.create_house(0, true)
 		h.position = Vector3(-1.4, 0.0, -0.6)
 		world_root.add_child(h)
+		_player_colliders.append({"pos": Vector2(-1.4, -0.6), "radius": 1.35})
 	elif jabatan == "Ketua RT 03":
 		_spawn_rt_cluster(Vector3(0.0, 0.0, 0.0), "RT 03", 10, true)
 		_spawn_pos_ronda(Vector3(7.5, 0.0, 0.2))
@@ -297,9 +431,11 @@ func _rebuild_world() -> void:
 	if jabatan != "Warga":
 		tree_spots.append_array([Vector3(-9.5, 0.0, 4.5), Vector3(9.5, 0.0, 4.5), Vector3(-10.5, 0.0, -3.5), Vector3(10.5, 0.0, -3.5)])
 	for ti in range(tree_spots.size()):
-		var tr := S1VisualBuilder.create_tree(ti)
-		tr.position = tree_spots[ti]
-		world_root.add_child(tr)
+		var tr_node: Node3D = S1VisualBuilder.create_tree(ti)
+		tr_node.position = tree_spots[ti]
+		world_root.add_child(tr_node)
+		_s1_trees.append(tr_node)
+		_player_colliders.append({"pos": Vector2(tree_spots[ti].x, tree_spots[ti].z), "radius": 0.65})
 
 	for lx in [-4.5, 0.5, 5.5]:
 		var lmp := S1VisualBuilder.create_street_lamp()
@@ -307,30 +443,63 @@ func _rebuild_world() -> void:
 		world_root.add_child(lmp)
 
 	var warung := S1VisualBuilder.create_warung()
-	warung.position = Vector3(3.2, 0.0, -0.4)
+	_warung_pos = Vector3(3.2, 0.0, -0.4)
+	_has_warung = true
+	warung.position = _warung_pos
 	world_root.add_child(warung)
+	_player_colliders.append({"pos": Vector2(_warung_pos.x, _warung_pos.z), "radius": 1.1})
 
 	var bin := S1VisualBuilder.create_trash_bin()
 	bin.position = Vector3(1.8, 0.0, 1.0)
 	world_root.add_child(bin)
 
-	# Karakter pemain + 4 warga kampung berjalan (tanpa Pak Slamet)
-	_spawn_player_character(Vector3(0.6, 0.0, 1.2))
-	var walk_span: float = 5.0 if jabatan == "Warga" else 10.0
-	for vi in range(4):
-		var rig: Dictionary = S1VisualBuilder.create_citizen_rig(vi + 1, false)
+	# Karakter pemain + 6 warga bernama dengan model & sifat berbeda
+	_spawn_player_character(posisi_pemain)
+	var walk_span: float = 5.2 if jabatan == "Warga" else 10.0
+	var villager_defs: Array = [
+		{"name": "Mbak Sari", "gender": "F", "age": 27, "job": "Penjual Sayur", "trait": "Ramah", "history": "Pernah membantu warga saat banjir kecil di RT.", "shirt": Color(0.88, 0.35, 0.45), "head": Color(0.92, 0.72, 0.80), "h": 0.96, "quotes": ["Pagi! Sayurnya segar-segar nih.", "Semoga jalan kampung segera diaspal rata."]},
+		{"name": "Pak Budi", "gender": "M", "age": 42, "job": "Sopir Ojek", "trait": "Rajin", "history": "Pernah keseleo ringan saat menghindar lubang jalan.", "shirt": Color(0.22, 0.58, 0.38), "head": Color(0.24, 0.30, 0.38), "h": 1.04, "quotes": ["Pak, jalannya rusak nih di tikungan.", "Hari ini orderan lumayan ramai!"]},
+		{"name": "Mas Dimas", "gender": "M", "age": 24, "job": "Karyawan Toko", "trait": "Suka ngobrol", "history": "Sering ikut kerja bakti membersihkan selokan.", "shirt": Color(0.26, 0.52, 0.85), "head": Color(0.78, 0.32, 0.22), "h": 1.00, "quotes": ["duh ini macet banget sih di simpang depan.", "Enak nih sore-sore jalan kaki di kampung."]},
+		{"name": "Bu Rina", "gender": "F", "age": 36, "job": "Penjahit", "trait": "Teliti", "history": "Pernah menjahit seragam panitia 17-an kampung.", "shirt": Color(0.65, 0.42, 0.80), "head": Color(0.22, 0.16, 0.12), "h": 0.94, "quotes": ["Harga bahan pokok agak naik bulan ini.", "Lingkungan bersih bikin kerja jadi tenang."]},
+		{"name": "Pak Agus", "gender": "M", "age": 48, "job": "Montir Bengkel", "trait": "Sabar", "history": "Selalu siap membantu menambal ban tetangga.", "shirt": Color(0.85, 0.62, 0.22), "head": Color(0.32, 0.36, 0.42), "h": 1.07, "quotes": ["Tong sampah di ujung gang perlu ditambah.", "Jangan lupa cek kesehatan tiap bulan ya."]},
+		{"name": "Mbak Dewi", "gender": "F", "age": 29, "job": "Perawat Klinik", "trait": "Peduli", "history": "Aktif mengedukasi warga soal kebersihan air.", "shirt": Color(0.20, 0.70, 0.68), "head": Color(0.85, 0.88, 0.94), "h": 0.98, "quotes": ["Jangan buang sampah ke selokan ya.", "Semangat kerjanya hari ini!"]}
+	]
+	for vi in range(villager_defs.size()):
+		var vd: Dictionary = villager_defs[vi]
+		var rig: Dictionary = S1VisualBuilder.create_citizen_rig(vi + 1, false, str(vd["gender"]), float(vd["h"]), vd["shirt"], vd["head"])
 		var rnode: Node3D = rig["root"]
-		var start_x: float = -walk_span + float(vi) * 2.2
+		var start_x: float = -walk_span + float(vi) * 1.8
 		var dir_v: float = 1.0 if (vi % 2 == 0) else -1.0
-		rnode.position = Vector3(start_x, 0.0, 2.0 + float(vi % 2) * 0.7)
+		rnode.position = Vector3(start_x, 0.0, 1.8 + float(vi % 3) * 0.55)
 		rnode.rotation.y = PI * 0.5 if dir_v > 0.0 else -PI * 0.5
 		world_root.add_child(rnode)
+
+		var b_lbl: Label3D = Label3D.new()
+		b_lbl.visible = false
+		b_lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		b_lbl.font_size = 20
+		b_lbl.outline_size = 4
+		b_lbl.outline_modulate = Color(0.06, 0.08, 0.12)
+		b_lbl.position = Vector3(0.0, 1.75, 0.0)
+		b_lbl.no_depth_test = true
+		rnode.add_child(b_lbl)
+
 		_villagers.append({
 			"rig": rig,
+			"bubble": b_lbl,
+			"bubble_timer": 0.0,
+			"cooldown": 0.0,
+			"name": vd["name"],
+			"gender": vd["gender"],
+			"age": vd["age"],
+			"job": vd["job"],
+			"trait": vd["trait"],
+			"history": vd["history"],
+			"quotes": vd["quotes"],
 			"start_x": -walk_span,
 			"end_x": walk_span,
 			"dir": dir_v,
-			"speed": 1.1 + float(vi) * 0.15,
+			"speed": 0.95 + float(vi % 3) * 0.18,
 			"phase": float(vi) * 1.4
 		})
 
@@ -481,10 +650,77 @@ func _spawn_signboard(pos: Vector3, text: String) -> void:
 	world_root.add_child(sign_node)
 
 func _spawn_player_character(pos: Vector3) -> void:
-	var rig: Dictionary = S1VisualBuilder.create_citizen_rig(0, true)
-	var player: Node3D = rig["root"]
-	player.position = pos
-	world_root.add_child(player)
+	_player_rig = S1VisualBuilder.create_citizen_rig(0, true)
+	_player_node = _player_rig["root"]
+	_player_node.position = pos
+	posisi_pemain = pos
+	world_root.add_child(_player_node)
+
+func _is_pos_blocked(p2: Vector2) -> bool:
+	if absf(p2.x) > _world_bound or absf(p2.y) > _world_bound:
+		return true
+	for col in _player_colliders:
+		var cpos: Vector2 = col["pos"]
+		var crad: float = float(col["radius"])
+		if p2.distance_to(cpos) < crad:
+			return true
+	return false
+
+func _move_player(dir2: Vector2, delta: float) -> void:
+	var spd: float = 3.2
+	var cur: Vector3 = _player_node.position
+	var step: Vector2 = dir2 * spd * delta
+	var try_x: Vector2 = Vector2(cur.x + step.x, cur.z)
+	if not _is_pos_blocked(try_x):
+		cur.x = try_x.x
+	var try_z: Vector2 = Vector2(cur.x, cur.z + step.y)
+	if not _is_pos_blocked(try_z):
+		cur.z = try_z.y
+	_player_node.position = cur
+	posisi_pemain = cur
+	_player_node.rotation.y = atan2(dir2.x, dir2.y)
+
+	_player_phase += delta * spd * 4.5
+	var swing: float = sin(_player_phase) * 0.45
+	(_player_rig["pivot"] as Node3D).position.y = abs(sin(_player_phase)) * 0.05
+	(_player_rig["leg_l"] as MeshInstance3D).rotation.x = swing
+	(_player_rig["leg_r"] as MeshInstance3D).rotation.x = -swing
+	(_player_rig["arm_l"] as MeshInstance3D).rotation.x = -swing * 0.8
+	(_player_rig["arm_r"] as MeshInstance3D).rotation.x = swing * 0.8
+
+func _try_click_villager(screen_pos: Vector2) -> void:
+	if not cam or _barista_scene_active:
+		return
+	var ro: Vector3 = cam.project_ray_origin(screen_pos)
+	var rd: Vector3 = cam.project_ray_normal(screen_pos)
+	if absf(rd.y) < 0.0001:
+		return
+	var t: float = -ro.y / rd.y
+	if t <= 0.0:
+		return
+	var hit: Vector3 = ro + rd * t
+	for v in _villagers:
+		var rig: Dictionary = v["rig"]
+		var rnode: Node3D = rig["root"]
+		if rnode and is_instance_valid(rnode) and rnode.position.distance_to(hit) <= 1.2:
+			_open_villager_modal(v)
+			return
+
+func _open_villager_modal(v: Dictionary) -> void:
+	if not villager_modal:
+		return
+	var vname: String = str(v.get("name", "Warga"))
+	if not (vname in warga_ditemui):
+		warga_ditemui.append(vname)
+		_refresh_hud()
+	lbl_vm_title.text = vname
+	lbl_vm_info.text = "Umur: %d tahun\nPekerjaan: %s\nSifat: %s\nRiwayat: %s" % [
+		int(v.get("age", 30)),
+		str(v.get("job", "-")),
+		str(v.get("trait", "-")),
+		str(v.get("history", "-"))
+	]
+	villager_modal.visible = true
 
 func _make_stylebox(bg: Color, radius: int = 10, pad_h: float = 12.0, pad_v: float = 10.0) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
@@ -673,6 +909,7 @@ func _build_ui() -> void:
 	top_hbox.add_child(btn_s1_photo)
 
 	s1_photo_helper = PhotoModeHelper.new()
+	s1_photo_helper.process_mode = Node.PROCESS_MODE_ALWAYS
 	ui_layer.add_child(s1_photo_helper)
 	s1_photo_helper.setup([hud_root], func() -> Dictionary:
 		return {
@@ -683,7 +920,80 @@ func _build_ui() -> void:
 	)
 	s1_photo_helper.photo_mode_toggled.connect(func(is_on: bool):
 		s1_photo_paused = is_on
+		if get_tree():
+			get_tree().paused = is_on
 	)
+
+	# Virtual Joystick di kiri bawah untuk layar sentuh HP
+	_joystick = S1SimpleJoystick.new()
+	_joystick.anchor_left = 0.0
+	_joystick.anchor_top = 1.0
+	_joystick.anchor_right = 0.0
+	_joystick.anchor_bottom = 1.0
+	_joystick.offset_left = 18.0
+	_joystick.offset_top = -128.0
+	_joystick.offset_right = 128.0
+	_joystick.offset_bottom = -18.0
+	hud_root.add_child(_joystick)
+
+	# Modal Profil Warga Kampung
+	villager_modal = PanelContainer.new()
+	villager_modal.visible = false
+	villager_modal.set_anchors_preset(Control.PRESET_CENTER)
+	villager_modal.offset_left = -180.0
+	villager_modal.offset_top = -110.0
+	villager_modal.offset_right = 180.0
+	villager_modal.offset_bottom = 110.0
+	villager_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 16, 18.0, 14.0, 0.96))
+	ui_layer.add_child(villager_modal)
+	var vmvb: VBoxContainer = VBoxContainer.new()
+	vmvb.add_theme_constant_override("separation", 8)
+	villager_modal.add_child(vmvb)
+	lbl_vm_title = Label.new()
+	lbl_vm_title.add_theme_font_size_override("font_size", 18)
+	lbl_vm_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.28))
+	vmvb.add_child(lbl_vm_title)
+	lbl_vm_info = Label.new()
+	lbl_vm_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_vm_info.add_theme_font_size_override("font_size", 13)
+	vmvb.add_child(lbl_vm_info)
+	var btn_vm_close: Button = Button.new()
+	btn_vm_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_vm_close, 36.0)
+	btn_vm_close.pressed.connect(func(): villager_modal.visible = false)
+	vmvb.add_child(btn_vm_close)
+
+	# Overlay Adegan Kerja Barista (5-10 detik + tombol Lewati)
+	_barista_overlay = Control.new()
+	_barista_overlay.visible = false
+	_barista_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_barista_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_layer.add_child(_barista_overlay)
+	var bar_panel: PanelContainer = PanelContainer.new()
+	bar_panel.anchor_left = 0.5
+	bar_panel.anchor_top = 1.0
+	bar_panel.anchor_right = 0.5
+	bar_panel.anchor_bottom = 1.0
+	bar_panel.offset_left = -260.0
+	bar_panel.offset_top = -78.0
+	bar_panel.offset_right = 260.0
+	bar_panel.offset_bottom = -16.0
+	bar_panel.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 14, 14.0, 10.0, 0.94))
+	_barista_overlay.add_child(bar_panel)
+	var bar_hb: HBoxContainer = HBoxContainer.new()
+	bar_hb.add_theme_constant_override("separation", 12)
+	bar_panel.add_child(bar_hb)
+	var bar_lbl: Label = Label.new()
+	bar_lbl.text = "Menyeduh kopi untuk pelanggan..."
+	bar_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar_lbl.add_theme_font_size_override("font_size", 14)
+	bar_hb.add_child(bar_lbl)
+	var btn_skip: Button = Button.new()
+	btn_skip.text = "Lewati (Esc)"
+	btn_skip.custom_minimum_size = Vector2(115, 38)
+	UIThemeHelper.apply_btn_secondary(btn_skip, 38.0)
+	btn_skip.pressed.connect(func(): _barista_skipped = true)
+	bar_hb.add_child(btn_skip)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -782,7 +1092,6 @@ func _build_ui() -> void:
 	lbl_gov_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.28))
 	gvbox.add_child(lbl_gov_title)
 	gvbox.add_child(HSeparator.new())
-	gvbox.add_child(lbl_gov_title)
 
 	lbl_gov_info = Label.new()
 	lbl_gov_info.add_theme_font_size_override("font_size", 12)
@@ -1013,6 +1322,85 @@ func _on_election_pressed() -> void:
 	_save_s1()
 
 func _on_next_month_pressed() -> void:
+	if _barista_scene_active:
+		return
+	if pekerjaan == "Barista" and not (jabatan in ["Lurah", "Camat"]) and _has_warung and world_root:
+		await _play_barista_scene()
+	_execute_monthly_step()
+
+func _play_barista_scene() -> void:
+	_barista_scene_active = true
+	_barista_skipped = false
+	var saved_pos: Vector3 = _player_node.position if (_player_node and is_instance_valid(_player_node)) else posisi_pemain
+	var saved_cam_target: Vector3 = _cam_target
+	if hud_root:
+		hud_root.visible = false
+	if _barista_overlay:
+		_barista_overlay.visible = true
+
+	if _player_node and is_instance_valid(_player_node):
+		_player_node.position = _warung_pos + Vector3(0.0, 0.0, -0.75)
+		_player_node.rotation.y = 0.0
+
+	var cust_rig: Dictionary = S1VisualBuilder.create_citizen_rig(2, false, "F", 0.98)
+	var cust_node: Node3D = cust_rig["root"]
+	cust_node.position = _warung_pos + Vector3(0.0, 0.0, 0.95)
+	cust_node.rotation.y = PI
+	world_root.add_child(cust_node)
+
+	var cup: MeshInstance3D = MeshInstance3D.new()
+	var cup_box: BoxMesh = BoxMesh.new()
+	cup_box.size = Vector3(0.14, 0.16, 0.14)
+	var cup_mat: StandardMaterial3D = StandardMaterial3D.new()
+	cup_mat.albedo_color = Color(0.95, 0.95, 0.96)
+	cup.mesh = cup_box
+	cup.material_override = cup_mat
+	cup.position = _warung_pos + Vector3(0.0, 0.85, 0.25)
+	world_root.add_child(cup)
+
+	var steam: MeshInstance3D = MeshInstance3D.new()
+	var st_box: BoxMesh = BoxMesh.new()
+	st_box.size = Vector3(0.08, 0.12, 0.08)
+	var st_mat: StandardMaterial3D = StandardMaterial3D.new()
+	st_mat.albedo_color = Color(0.96, 0.96, 0.98, 0.70)
+	st_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	steam.mesh = st_box
+	steam.material_override = st_mat
+	steam.position = cup.position + Vector3(0.0, 0.20, 0.0)
+	world_root.add_child(steam)
+
+	var elapsed: float = 0.0
+	while elapsed < 6.0 and not _barista_skipped:
+		if not get_tree():
+			break
+		await get_tree().process_frame
+		var dt: float = get_process_delta_time()
+		elapsed += dt
+		_cam_target = _cam_target.lerp(_warung_pos, clampf(dt * 3.5, 0.0, 1.0))
+		if cam:
+			cam.position = _cam_target + Vector3(3.2, 2.8, 3.8)
+			cam.look_at(_cam_target + Vector3(0.0, 0.7, 0.0), Vector3.UP)
+		if is_instance_valid(steam):
+			steam.position.y = cup.position.y + 0.18 + fmod(elapsed * 0.45, 0.45)
+
+	if is_instance_valid(cust_node):
+		cust_node.queue_free()
+	if is_instance_valid(cup):
+		cup.queue_free()
+	if is_instance_valid(steam):
+		steam.queue_free()
+	if _player_node and is_instance_valid(_player_node):
+		_player_node.position = saved_pos
+	_cam_target = saved_cam_target
+	_update_camera(Vector2.ZERO)
+	if _barista_overlay:
+		_barista_overlay.visible = false
+	if hud_root:
+		hud_root.visible = true
+	pernah_adegan_barista = true
+	_barista_scene_active = false
+
+func _execute_monthly_step() -> void:
 	var salary: int = 0
 	var log_lines: Array[String] = []
 
@@ -1281,8 +1669,9 @@ func _refresh_hud() -> void:
 
 	var cur_job_txt: String = jabatan if jabatan in ["Lurah", "Camat"] else (pekerjaan if not pekerjaan.is_empty() else "Belum bekerja")
 	var hist_txt: String = ", ".join(riwayat_pekerjaan) if not riwayat_pekerjaan.is_empty() else "-"
-	lbl_profile.text = "Nama: %s (%d tahun)\nJabatan: %s\nBulan ke-%d | Kerja: %s\nRiwayat: %s" % [
-		nama, umur, jabatan, bulan, cur_job_txt, hist_txt
+	var met_txt: String = ", ".join(warga_ditemui) if not warga_ditemui.is_empty() else "-"
+	lbl_profile.text = "Nama: %s (%d tahun)\nJabatan: %s\nBulan ke-%d | Kerja: %s\nRiwayat: %s\nWarga ditemui: %s" % [
+		nama, umur, jabatan, bulan, cur_job_txt, hist_txt, met_txt
 	]
 
 	var cd_left: int = maxi(0, pemilu_cooldown_until - bulan)
@@ -1496,6 +1885,9 @@ func _save_s1() -> void:
 	cfg.set_value("warga", "active_complaints", active_complaints.duplicate(true))
 	cfg.set_value("warga", "waktu_jam", s1_waktu_jam)
 	cfg.set_value("warga", "cuaca_saat_ini", s1_cuaca)
+	cfg.set_value("warga", "posisi_pemain", posisi_pemain)
+	cfg.set_value("warga", "warga_ditemui", warga_ditemui.duplicate())
+	cfg.set_value("warga", "pernah_adegan_barista", pernah_adegan_barista)
 	cfg.save(SAVE_S1_PATH)
 
 func _load_s1() -> bool:
@@ -1539,6 +1931,11 @@ func _load_s1() -> bool:
 	active_complaints = comp_val.duplicate(true) if comp_val is Array else []
 	s1_waktu_jam = float(cfg.get_value("warga", "waktu_jam", 12.0))
 	s1_cuaca = str(cfg.get_value("warga", "cuaca_saat_ini", "cerah"))
+	var pos_val: Variant = cfg.get_value("warga", "posisi_pemain", Vector3(0.6, 0.0, 1.2))
+	posisi_pemain = pos_val if pos_val is Vector3 else Vector3(0.6, 0.0, 1.2)
+	var wd_val: Variant = cfg.get_value("warga", "warga_ditemui", [])
+	warga_ditemui = wd_val.duplicate() if wd_val is Array else []
+	pernah_adegan_barista = bool(cfg.get_value("warga", "pernah_adegan_barista", false))
 	return true
 
 func _build_pause_and_settings_s1() -> void:

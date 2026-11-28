@@ -45,12 +45,27 @@ func _create_citizens() -> void:
 	walkers.clear()
 
 	var profiles: Array = city_data.citizens_data
+	var shadow_mesh := CylinderMesh.new()
+	shadow_mesh.top_radius = 0.20
+	shadow_mesh.bottom_radius = 0.20
+	shadow_mesh.height = 0.012
+	shadow_mesh.radial_segments = 10
+	var shadow_mat := StandardMaterial3D.new()
+	shadow_mat.albedo_color = Color(0.05, 0.06, 0.08, 0.32)
+	shadow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shadow_mat.roughness = 1.0
 	for i in range(mini(profiles.size(), 8)):
 		var w_node := Node3D.new()
 		w_node.visible = false
 
 		var body := BuildingBuilder.create_citizen_node(i)
 		w_node.add_child(body)
+		var b_shadow := MeshInstance3D.new()
+		b_shadow.mesh = shadow_mesh
+		b_shadow.material_override = shadow_mat
+		b_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		b_shadow.position = Vector3(0.0, 0.012, 0.0)
+		w_node.add_child(b_shadow)
 		var umb := Node3D.new()
 		umb.name = "Umbrella"
 		umb.visible = false
@@ -125,12 +140,12 @@ func _process(delta: float) -> void:
 		var p1 := CityData.tile_to_world_pos(walker.current_tile.x, walker.current_tile.y) + walker.side_offset
 		var p2 := CityData.tile_to_world_pos(walker.target_tile.x, walker.target_tile.y) + walker.side_offset
 		var cur_pos := p1.lerp(p2, walker.progress)
-		cur_pos.y = 0.03
+		cur_pos.y = 0.03 + abs(sin(walker.progress * PI * 4.0)) * 0.035
 		walker.node.global_position = cur_pos
 
 		var dir := (p2 - p1).normalized()
 		if dir.length_squared() > 0.001:
-			walker.node.rotation.y = atan2(-dir.x, -dir.z)
+			walker.node.rotation.y = lerp_angle(walker.node.rotation.y, atan2(-dir.x, -dir.z), clampf(delta * 8.0, 0.0, 1.0))
 
 		# Update timer terima kasih jika keluhan baru diselesaikan
 		if walker.thank_you_timer > 0.0:

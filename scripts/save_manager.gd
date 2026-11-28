@@ -137,6 +137,10 @@ static func save_season2(data: CityData) -> bool:
 	cfg.set_value("city", "health", data.health)
 	cfg.set_value("city", "fire_cooldown_months", data.fire_cooldown_months)
 	cfg.set_value("city", "active_fire", data.active_fire.duplicate(true))
+	cfg.set_value("city", "insiden_aktif", data.insiden_aktif.duplicate(true))
+	cfg.set_value("city", "unit_status", data.unit_status.duplicate(true))
+	cfg.set_value("city", "theft_cooldown_months", data.theft_cooldown_months)
+	cfg.set_value("city", "riot_cooldown_months", data.riot_cooldown_months)
 	cfg.set_value("city", "public_buildings", data.get_public_buildings_list())
 	cfg.set_value("city", "military_zones", data.get_military_zones_list())
 	cfg.set_value("city", "transport", {
@@ -201,6 +205,12 @@ static func load_season2(data: CityData) -> bool:
 	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
 	var af = cfg.get_value("city", "active_fire", {})
 	data.active_fire = af.duplicate(true) if af is Dictionary else {}
+	var ins = cfg.get_value("city", "insiden_aktif", {})
+	data.insiden_aktif = ins.duplicate(true) if ins is Dictionary else {}
+	var us = cfg.get_value("city", "unit_status", [])
+	data.unit_status = us.duplicate(true) if us is Array else []
+	data.theft_cooldown_months = int(cfg.get_value("city", "theft_cooldown_months", 0))
+	data.riot_cooldown_months = int(cfg.get_value("city", "riot_cooldown_months", 0))
 	data.city_level = str(cfg.get_value("city", "city_level", CityData.get_city_tier(data.population)))
 	data.wheat_inventory = int(cfg.get_value("city", "wheat_inventory", 0))
 	data.wheat_price = int(cfg.get_value("city", "wheat_price", 1200))
@@ -300,6 +310,12 @@ static func load_season2(data: CityData) -> bool:
 	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
 	var af2 = cfg.get_value("city", "active_fire", {})
 	data.active_fire = af2.duplicate(true) if af2 is Dictionary else {}
+	var ins2 = cfg.get_value("city", "insiden_aktif", {})
+	data.insiden_aktif = ins2.duplicate(true) if ins2 is Dictionary else {}
+	var us2 = cfg.get_value("city", "unit_status", [])
+	data.unit_status = us2.duplicate(true) if us2 is Array else []
+	data.theft_cooldown_months = int(cfg.get_value("city", "theft_cooldown_months", 0))
+	data.riot_cooldown_months = int(cfg.get_value("city", "riot_cooldown_months", 0))
 	var tr_data = cfg.get_value("city", "transport", {})
 	if tr_data is Dictionary:
 		data.bus_kopaja_count = int(tr_data.get("bus_kopaja", 0))

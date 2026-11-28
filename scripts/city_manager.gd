@@ -13,8 +13,11 @@ signal open_building_info_modal(tile_pos: Vector2i, tile_info: Dictionary)
 signal move_mode_changed(active: bool)
 signal map_tapped()
 signal time_weather_updated(month: int, year: int, jam: float, cuaca: String)
+signal open_farm_info_modal(tile_pos: Vector2i, tile_info: Dictionary)
+signal open_incident_modal()
 
 enum ToolMode {
+	NONE,
 	ROAD,
 	ZONE_R,
 	ZONE_C,
@@ -65,6 +68,7 @@ var wet_road_root: Node3D = null
 var event_props_root: Node3D = null
 var _weather_hud_accum: float = 0.0
 var ambient_helper: AmbientLifeHelper = null
+var emergency_manager: EmergencyUnitManager = null
 var _wave_strip: Node3D = null
 var _river_flow: Node3D = null
 var _traffic_timer: float = 0.0
@@ -146,6 +150,11 @@ func _ready() -> void:
 	ambient_helper = AmbientLifeHelper.new()
 	add_child(ambient_helper)
 	ambient_helper.setup(city_data.map_landscape == "pantai", _wave_strip, _river_flow)
+	emergency_manager = EmergencyUnitManager.new()
+	emergency_manager.name = "EmergencyUnitManager"
+	add_child(emergency_manager)
+	emergency_manager.setup(city_data)
+	emergency_manager.unit_arrived.connect(_on_emergency_unit_arrived)
 	city_updated.emit(city_data)
 	if loaded_from_save:
 		show_toast.emit("Kota berhasil dimuat dari save!")
@@ -154,6 +163,8 @@ func _ready() -> void:
 		show_toast.emit("Selamat datang Walikota %s! Modal awal kotamu: Rp %s" % [city_data.mayor_name, _format_number(city_data.money)])
 
 func _process(delta: float) -> void:
+	if emergency_manager:
+		emergency_manager.speed_multiplier = city_data.game_speed
 	if city_data.game_speed > 0.0:
 		month_timer += delta * city_data.game_speed
 		if month_timer >= MONTH_DURATION:
@@ -214,7 +225,8 @@ static func is_movable_building(tile: Dictionary) -> bool:
 	var lv: int = tile.get("level", 0)
 	if tp in [
 		CityData.TileType.EMPTY, CityData.TileType.ROAD, CityData.TileType.RAIL,
-		CityData.TileType.BUSWAY_LANE, CityData.TileType.FLYOVER, CityData.TileType.RUNWAY
+		CityData.TileType.BUSWAY_LANE, CityData.TileType.FLYOVER, CityData.TileType.RUNWAY,
+		CityData.TileType.FARM
 	]:
 		return false
 	if tp in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I, CityData.TileType.ZONE_MILITARY]:
@@ -223,7 +235,7 @@ static func is_movable_building(tile: Dictionary) -> bool:
 
 static func is_rotatable_tile(tile: Dictionary) -> bool:
 	var tp: int = tile.get("type", CityData.TileType.EMPTY)
-	if tp == CityData.TileType.EMPTY or tp == CityData.TileType.ROAD:
+	if tp in [CityData.TileType.EMPTY, CityData.TileType.ROAD, CityData.TileType.FARM]:
 		return false
 	return true
 
@@ -245,7 +257,7 @@ func cancel_move_building() -> void:
 
 func _is_rotatable_tool(mode: ToolMode) -> bool:
 	return mode in [
-		ToolMode.POWER_PLANT, ToolMode.WATER_TOWER, ToolMode.PARK, ToolMode.FARM,
+		ToolMode.POWER_PLANT, ToolMode.WATER_TOWER, ToolMode.PARK,
 		ToolMode.SCHOOL, ToolMode.CLINIC, ToolMode.HOSPITAL, ToolMode.POLICE,
 		ToolMode.MILITARY, ToolMode.MAYOR_OFFICE, ToolMode.FIRE_STATION,
 		ToolMode.TRAIN_STATION, ToolMode.STOP_ANGKOT, ToolMode.STOP_BUS,
@@ -438,7 +450,10 @@ func _on_tile_clicked(screen_pos: Vector2) -> void:
 		return
 
 	if not city_data.is_region_unlocked(reg):
-		if city_data.is_region_allowed_by_landscape(reg):
+		if current_tool != ToolMode.NONE:
+			AudioManager.play_sfx(self, "error")
+			show_toast.emit("Buka wilayah ini dulu (klik lahan terkunci)")
+		elif city_data.is_region_allowed_by_landscape(reg):
 			if city_data.unlocked_regions.size() >= 9:
 				AudioManager.play_sfx(self, "error")
 				show_toast.emit("Wilayah maksimal tercapai")
@@ -474,18 +489,43 @@ func _on_tile_clicked(screen_pos: Vector2) -> void:
 		open_townhall_modal.emit()
 		return
 
-	# 4. Cek apakah klik mengenai bangunan rusak akibat kebakaran (untuk diperbaiki)
+	# 4. Cek apakah klik mengenai insiden aktif atau bangunan rusak akibat kebakaran
+	if current_tool != ToolMode.BULLDOZER and not city_data.insiden_aktif.is_empty():
+		var inc_pos: Vector2i = city_data.insiden_aktif.get("pos", Vector2i(-1, -1))
+		var inc_extra: Vector2i = city_data.insiden_aktif.get("extra_pos", Vector2i(-1, -1))
+		if tile_coords == inc_pos or (inc_extra != Vector2i(-1, -1) and tile_coords == inc_extra):
+			open_incident_modal.emit()
+			return
 	if current_tool != ToolMode.BULLDOZER and not city_data.active_fire.is_empty():
 		if city_data.active_fire.get("pos", Vector2i(-1, -1)) == tile_coords:
 			var f_state: String = str(city_data.active_fire.get("state", ""))
 			if f_state in ["damaged_light", "damaged_heavy"]:
 				_repair_fire_damage()
 				return
+			elif f_state == "burning":
+				open_incident_modal.emit()
+				return
 
-	# 5. Klik bangunan yang sudah ada -> buka info bangunan (Putar / Pindah)
+	# 5. Klik lahan Farm (panen langsung jika Siap Panen, atau buka Panel Info Lahan jika belum siap)
 	var clicked_tile: Dictionary = city_data.get_tile(tile_coords.x, tile_coords.y)
+	if int(clicked_tile.get("type", CityData.TileType.EMPTY)) == CityData.TileType.FARM:
+		if current_tool == ToolMode.BULLDOZER:
+			_apply_tool(tile_coords.x, tile_coords.y)
+			return
+		if current_tool == ToolMode.NONE or int(clicked_tile.get("level", 0)) >= 3:
+			if int(clicked_tile.get("level", 0)) >= 3:
+				harvest_farm_at(tile_coords.x, tile_coords.y)
+			else:
+				open_farm_info_modal.emit(tile_coords, clicked_tile)
+			return
+		return
+
+	# 6. Klik bangunan yang sudah ada -> buka info bangunan (Putar / Pindah)
 	if is_rotatable_tile(clicked_tile) and current_tool not in [ToolMode.BULLDOZER, ToolMode.POWER_CABLE, ToolMode.WATER_PIPE, ToolMode.WIDEN_ROAD, ToolMode.FLYOVER]:
 		open_building_info_modal.emit(tile_coords, clicked_tile)
+		return
+
+	if current_tool == ToolMode.NONE:
 		return
 
 	_apply_tool(tile_coords.x, tile_coords.y)
@@ -772,22 +812,49 @@ func _apply_tool(x: int, y: int) -> void:
 	city_updated.emit(city_data)
 
 func _harvest_farm(x: int, y: int) -> void:
+	harvest_farm_at(x, y)
+
+func harvest_farm_at(x: int, y: int) -> bool:
+	if not city_data or not city_data.is_valid_tile(x, y):
+		return false
+	var t: Dictionary = city_data.get_tile(x, y)
+	if int(t.get("type", CityData.TileType.EMPTY)) != CityData.TileType.FARM:
+		return false
+	if int(t.get("level", 0)) < 3:
+		return false
+
+	# Kunci tahap lebih dulu untuk mencegah panen ganda pada double-tap
+	city_data.set_tile(x, y, CityData.TileType.FARM, 1)
 	city_data.wheat_inventory += CityData.WHEAT_PER_HARVEST
 	city_data.wheat_harvest_count += 1
-	city_data.set_tile(x, y, CityData.TileType.FARM, 1) # Kembali ke tahap Benih
 	_update_tile_visual(x, y)
 
-	# Tampilkan teks melayang "+10 Gandum" di atas lahan
 	var popup: Label3D = BuildingBuilder.create_harvest_popup(CityData.WHEAT_PER_HARVEST)
 	popup.position = CityData.tile_to_world_pos(x, y)
 	add_child(popup)
-	var tween := create_tween()
+	var tween: Tween = create_tween()
 	tween.tween_property(popup, "position:y", popup.position.y + 1.2, 1.2)
 	tween.parallel().tween_property(popup, "modulate:a", 0.0, 1.2)
 	tween.tween_callback(popup.queue_free)
 
 	AudioManager.play_sfx(self, "harvest")
 	show_toast.emit("+%d Gandum masuk gudang!" % CityData.WHEAT_PER_HARVEST)
+	city_updated.emit(city_data)
+	return true
+
+func bulldoze_farm_at(x: int, y: int) -> void:
+	if not city_data or not city_data.is_valid_tile(x, y):
+		return
+	var t: Dictionary = city_data.get_tile(x, y)
+	if int(t.get("type", CityData.TileType.EMPTY)) != CityData.TileType.FARM:
+		return
+	city_data.set_tile(x, y, CityData.TileType.EMPTY, 0)
+	city_data.update_utilities()
+	city_data.happiness = city_data.calculate_happiness()
+	_update_tile_visual(x, y)
+	_update_demand()
+	AudioManager.play_sfx(self, "bulldoze")
+	show_toast.emit("Lahan farm dihapus!")
 	city_updated.emit(city_data)
 
 func sell_all_wheat() -> void:
@@ -971,6 +1038,7 @@ func _advance_month() -> void:
 	# 7. Efek Bulanan Gedung Layanan Publik & Event Kebakaran
 	_apply_public_buildings_monthly()
 	_process_fire_event_monthly()
+	_process_incidents_monthly()
 	_process_city_events_monthly()
 	_process_citizen_wishes_monthly()
 
@@ -1099,14 +1167,25 @@ func _update_tile_visual(x: int, y: int) -> void:
 		node.add_child(BuildingBuilder.create_flyover_node(rshape))
 	else:
 		node = BuildingBuilder.create_tile_node(type, level, zone, has_util, variant)
-	if not city_data.active_fire.is_empty() and city_data.active_fire.get("pos", Vector2i(-1, -1)) == key:
-		var f_state: String = str(city_data.active_fire.get("state", ""))
-		if f_state == "burning":
-			node.add_child(BuildingBuilder.create_fire_effect_node())
-		elif f_state == "damaged_light":
-			node.add_child(BuildingBuilder.create_damaged_badge_node(false))
-		elif f_state == "damaged_heavy":
-			node.add_child(BuildingBuilder.create_damaged_badge_node(true))
+	if not city_data.active_fire.is_empty():
+		var af_pos: Vector2i = city_data.active_fire.get("pos", Vector2i(-1, -1))
+		var af_extra: Vector2i = city_data.active_fire.get("extra_pos", Vector2i(-1, -1))
+		if af_pos == key or (af_extra != Vector2i(-1, -1) and af_extra == key):
+			var f_state: String = str(city_data.active_fire.get("state", ""))
+			if f_state == "burning":
+				node.add_child(BuildingBuilder.create_fire_effect_node())
+			elif f_state == "damaged_light":
+				node.add_child(BuildingBuilder.create_damaged_badge_node(false))
+			elif f_state == "damaged_heavy":
+				node.add_child(BuildingBuilder.create_damaged_badge_node(true))
+	if not city_data.insiden_aktif.is_empty():
+		var inc_pos: Vector2i = city_data.insiden_aktif.get("pos", Vector2i(-1, -1))
+		var inc_type: String = str(city_data.insiden_aktif.get("type", ""))
+		if inc_pos == key:
+			if inc_type == "kemalingan":
+				node.add_child(_create_incident_marker_node("Ada maling semalam!", Color(0.95, 0.72, 0.20)))
+			elif inc_type == "kerusuhan":
+				node.add_child(_create_incident_marker_node("Kami marah!", Color(0.96, 0.32, 0.26)))
 	node.position = CityData.tile_to_world_pos(x, y)
 	node.rotation_degrees.y = float(tile_info.get("rotation", 0))
 	tiles_root.add_child(node)
@@ -1126,6 +1205,8 @@ func _refresh_all_visuals() -> void:
 		_recompute_road_shape_at(k.x, k.y)
 		_update_tile_visual(k.x, k.y)
 	_refresh_underground_visuals()
+	if emergency_manager:
+		emergency_manager.sync_units()
 
 func _sync_security_bonuses() -> void:
 	if not city_data:
@@ -1175,16 +1256,49 @@ func _process_fire_event_monthly() -> void:
 	if not city_data.active_fire.is_empty():
 		var f_state: String = str(city_data.active_fire.get("state", ""))
 		if f_state == "burning":
+			var inc_active: bool = (str(city_data.insiden_aktif.get("type", "")) == "kebakaran")
+			var damkar_sent: bool = bool(city_data.insiden_aktif.get("unit_dispatched", false)) if inc_active else false
+			var elapsed: int = int(city_data.active_fire.get("elapsed", 0)) + 1
+			city_data.active_fire["elapsed"] = elapsed
+
+			# Korban luka sembuh sendiri 2 bulan jika tidak ada RS/Puskesmas
+			if inc_active and bool(city_data.insiden_aktif.get("injured", false)) and not bool(city_data.insiden_aktif.get("ambulans_sent", false)):
+				var inj_m: int = int(city_data.insiden_aktif.get("injured_months", 0)) + 1
+				city_data.insiden_aktif["injured_months"] = inj_m
+				if inj_m >= 2:
+					city_data.insiden_aktif["injured"] = false
+					city_data.happiness = clampf(city_data.happiness - 2.0, 0.0, 100.0)
+					show_toast.emit("Warga luka akibat kebakaran sembuh sendiri (Kebahagiaan -2).")
+
+			# Menyebar ke 1 bangunan tetangga jika tidak ditangani dalam 1 bulan
+			if not damkar_sent and elapsed >= 1 and city_data.active_fire.get("extra_pos", Vector2i(-1, -1)) == Vector2i(-1, -1):
+				var fpos: Vector2i = city_data.active_fire.get("pos", Vector2i(-1, -1))
+				for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+					var np: Vector2i = fpos + d
+					if city_data.is_valid_tile(np.x, np.y):
+						var nt: Dictionary = city_data.get_tile(np.x, np.y)
+						var ntp: int = int(nt.get("type", CityData.TileType.EMPTY))
+						if int(nt.get("level", 0)) > 0 and ntp in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I, CityData.TileType.BUILDING]:
+							city_data.active_fire["extra_pos"] = np
+							if inc_active:
+								city_data.insiden_aktif["extra_pos"] = np
+							show_toast.emit("Api menyebar ke bangunan di (%d, %d)!" % [np.x, np.y])
+							_refresh_all_visuals()
+							break
+
 			var left: int = int(city_data.active_fire.get("months_left", 1)) - 1
 			city_data.active_fire["months_left"] = left
 			if left <= 0:
-				var had_damkar: bool = bool(city_data.active_fire.get("had_damkar", false)) or city_data.has_working_public(CityData.TileType.FIRE_STATION)
-				if had_damkar:
+				if damkar_sent:
 					city_data.active_fire["state"] = "damaged_light"
 					show_toast.emit("Kebakaran padam! Bangunan rusak ringan (klik untuk perbaiki Rp 10.000).")
 				else:
 					city_data.active_fire["state"] = "damaged_heavy"
 					show_toast.emit("Kebakaran padam! Bangunan rusak berat (klik untuk perbaiki Rp 25.000 / Bulldoze).")
+				if str(city_data.insiden_aktif.get("type", "")) == "kebakaran":
+					city_data.insiden_aktif.clear()
+				if emergency_manager:
+					emergency_manager.recall_units_for_resolved_incident()
 				for i in range(city_data.active_complaints.size() - 1, -1, -1):
 					if city_data.active_complaints[i].get("type", "") == ComplaintsData.COMPLAINT_FIRE:
 						city_data.active_complaints.remove_at(i)
@@ -1192,7 +1306,7 @@ func _process_fire_event_monthly() -> void:
 					citizen_manager.resolve_complaint(ComplaintsData.COMPLAINT_FIRE)
 		return
 
-	if city_data.fire_cooldown_months > 0 or city_data.population < 100:
+	if city_data.fire_cooldown_months > 0 or city_data.population < 100 or not city_data.insiden_aktif.is_empty():
 		return
 
 	if randf() >= 0.12:
@@ -1209,18 +1323,42 @@ func _process_fire_event_monthly() -> void:
 		return
 
 	var fire_pos: Vector2i = targets[randi() % targets.size()]
-	var has_damkar := city_data.has_working_public(CityData.TileType.FIRE_STATION)
+	var has_injured: bool = (randf() < 0.20)
+	var amb_sent: bool = false
 	city_data.active_fire = {
 		"pos": fire_pos,
+		"extra_pos": Vector2i(-1, -1),
 		"state": "burning",
-		"months_left": 1 if has_damkar else 3,
-		"had_damkar": has_damkar
+		"months_left": 3,
+		"elapsed": 0,
+		"had_damkar": false
 	}
+	city_data.insiden_aktif = {
+		"type": "kebakaran",
+		"title": "Kebakaran",
+		"pos": fire_pos,
+		"extra_pos": Vector2i(-1, -1),
+		"status": "Menunggu Damkar",
+		"unit_dispatched": false,
+		"tni_dispatched": false,
+		"injured": has_injured,
+		"injured_months": 0,
+		"ambulans_sent": false,
+		"months_left": 3
+	}
+	if has_injured and emergency_manager and emergency_manager.has_unit_kind("ambulans"):
+		var res: Dictionary = emergency_manager.dispatch_unit("ambulans", fire_pos)
+		if bool(res.get("ok", false)):
+			amb_sent = true
+			city_data.insiden_aktif["ambulans_sent"] = true
 	city_data.fire_cooldown_months = 12
 	if citizen_manager:
 		citizen_manager.trigger_fire_complaint("Blok (%d, %d)" % [fire_pos.x, fire_pos.y])
 	AudioManager.play_sfx(self, "complaint")
-	show_toast.emit("KEBAKARAN! Bangunan di (%d, %d) terbakar!" % [fire_pos.x, fire_pos.y])
+	if has_injured:
+		show_toast.emit("KEBAKARAN di (%d, %d)! %s" % [fire_pos.x, fire_pos.y, "Ambulans berangkat mengevakuasi korban luka!" if amb_sent else "1 warga luka ringan."])
+	else:
+		show_toast.emit("KEBAKARAN! Bangunan di (%d, %d) terbakar!" % [fire_pos.x, fire_pos.y])
 
 func _repair_fire_damage() -> void:
 	if city_data.active_fire.is_empty():
@@ -1236,6 +1374,234 @@ func _repair_fire_damage() -> void:
 	_refresh_all_visuals()
 	AudioManager.play_sfx(self, "build")
 	show_toast.emit("Bangunan selesai diperbaiki! (-Rp %s)" % _format_number(cost))
+	city_updated.emit(city_data)
+
+func _create_incident_marker_node(bubble_text: String, col: Color) -> Node3D:
+	var root := Node3D.new()
+	var icon := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(0.42, 0.42, 0.42)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = col
+	mat.emission_enabled = true
+	mat.emission = col
+	mat.emission_energy_multiplier = 0.9
+	icon.mesh = box
+	icon.material_override = mat
+	icon.position = Vector3(0.0, 2.2, 0.0)
+	root.add_child(icon)
+	var lbl := Label3D.new()
+	lbl.text = bubble_text
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 22
+	lbl.outline_size = 4
+	lbl.modulate = Color(1.0, 0.96, 0.78)
+	lbl.position = Vector3(0.0, 2.85, 0.0)
+	root.add_child(lbl)
+	return root
+
+func _process_incidents_monthly() -> void:
+	city_data.theft_cooldown_months = maxi(0, city_data.theft_cooldown_months - 1)
+	city_data.riot_cooldown_months = maxi(0, city_data.riot_cooldown_months - 1)
+
+	# Bonus patroli polisi: +2 Keamanan/bulan jika ada minimal 1 mobil patroli aktif
+	if emergency_manager and emergency_manager.has_patrol_active():
+		city_data.security = clampf(city_data.security + 2.0, 0.0, 100.0)
+
+	# Proses insiden aktif (kemalingan, kerusuhan, demo)
+	if not city_data.insiden_aktif.is_empty():
+		var inc_type: String = str(city_data.insiden_aktif.get("type", ""))
+		if inc_type == "kebakaran":
+			return
+		var dispatched: bool = bool(city_data.insiden_aktif.get("unit_dispatched", false))
+		var elapsed: int = int(city_data.insiden_aktif.get("months_elapsed", 0)) + 1
+		city_data.insiden_aktif["months_elapsed"] = elapsed
+
+		if inc_type == "kemalingan":
+			if dispatched:
+				var left: int = int(city_data.insiden_aktif.get("months_left", 1)) - 1
+				city_data.insiden_aktif["months_left"] = left
+				if left <= 0:
+					if randf() < 0.70:
+						city_data.money += 20000
+						city_data.security = clampf(city_data.security + 3.0, 0.0, 100.0)
+						city_data.popularity = clampf(city_data.popularity + 2.0, 0.0, 100.0)
+						show_toast.emit("Pencuri tertangkap! Barang kembali (+Rp 20.000, Keamanan +3).")
+					else:
+						city_data.money = maxi(0, city_data.money - 20000)
+						city_data.security = clampf(city_data.security - 2.0, 0.0, 100.0)
+						show_toast.emit("Pencuri kabur (-Rp 20.000, Keamanan -2).")
+					_clear_active_incident()
+			elif elapsed >= 1:
+				city_data.money = maxi(0, city_data.money - 20000)
+				city_data.security = clampf(city_data.security - 5.0, 0.0, 100.0)
+				city_data.happiness = clampf(city_data.happiness - 3.0, 0.0, 100.0)
+				show_toast.emit("Kemalingan tidak tertangani (-Rp 20.000, Keamanan -5, Kebahagiaan -3).")
+				_clear_active_incident()
+		elif inc_type == "kerusuhan":
+			var left_r: int = int(city_data.insiden_aktif.get("months_left", 2)) - 1
+			city_data.insiden_aktif["months_left"] = left_r
+			if dispatched and left_r <= 0:
+				var rpos: Vector2i = city_data.insiden_aktif.get("pos", Vector2i(-1, -1))
+				city_data.active_fire = {"pos": rpos, "extra_pos": Vector2i(-1, -1), "state": "damaged_light", "months_left": 0, "elapsed": 0, "had_damkar": true}
+				city_data.security = clampf(city_data.security + 5.0, 0.0, 100.0)
+				city_data.popularity = clampf(city_data.popularity - 3.0, 0.0, 100.0)
+				show_toast.emit("Kerusuhan berhasil ditenangkan! Bangunan rusak ringan (Perbaiki Rp 10.000).")
+				_clear_active_incident()
+			elif not dispatched and elapsed >= 2:
+				var rpos2: Vector2i = city_data.insiden_aktif.get("pos", Vector2i(-1, -1))
+				city_data.active_fire = {"pos": rpos2, "extra_pos": Vector2i(-1, -1), "state": "damaged_heavy", "months_left": 0, "elapsed": 0, "had_damkar": false}
+				city_data.security = clampf(city_data.security - 10.0, 0.0, 100.0)
+				city_data.popularity = clampf(city_data.popularity - 10.0, 0.0, 100.0)
+				city_data.happiness = clampf(city_data.happiness - 5.0, 0.0, 100.0)
+				show_toast.emit("Kerusuhan merusak bangunan! (Rusak berat, Keamanan -10, Popularitas -10).")
+				_clear_active_incident()
+		elif inc_type == "demo":
+			if dispatched:
+				var left_d: int = int(city_data.insiden_aktif.get("months_left", 1)) - 1
+				city_data.insiden_aktif["months_left"] = left_d
+				if left_d <= 0:
+					city_data.popularity = clampf(city_data.popularity + 2.0, 0.0, 100.0)
+					city_data.event_aktif.clear()
+					_rebuild_event_visuals()
+					show_toast.emit("Polisi menenangkan massa demo! (Popularitas +2).")
+					_clear_active_incident()
+			elif elapsed > 2:
+				# Demo dibiarkan > 2 bulan sebelum polisi dikirim -> berubah jadi Kerusuhan!
+				city_data.event_aktif.clear()
+				_rebuild_event_visuals()
+				_spawn_incident("kerusuhan", city_data.insiden_aktif.get("pos", Vector2i(7, 7)))
+				show_toast.emit("Demo memanas menjadi KERUSUHAN! Segera kirim Polisi / Bantuan TNI!")
+		return
+
+	if city_data.population < 40:
+		return
+
+	# Peluang Kerusuhan (paling jarang, maks 1x per 12 bulan, hanya jika Keamanan < 30 atau Kebahagiaan < 40)
+	if city_data.riot_cooldown_months <= 0 and (city_data.security < 30.0 or city_data.happiness < 40.0):
+		if randf() < 0.08:
+			var r_target: Vector2i = _pick_random_rc_building()
+			if r_target != Vector2i(-1, -1):
+				city_data.riot_cooldown_months = 12
+				_spawn_incident("kerusuhan", r_target)
+				return
+
+	# Peluang Kemalingan (maks 1x per 6 bulan)
+	if city_data.theft_cooldown_months <= 0:
+		var theft_chance: float = 0.08
+		if city_data.security < 40.0:
+			theft_chance = 0.16
+		elif emergency_manager and emergency_manager.has_patrol_active():
+			theft_chance = 0.04
+		if randf() < theft_chance:
+			var t_target: Vector2i = _pick_random_rc_building()
+			if t_target != Vector2i(-1, -1):
+				city_data.theft_cooldown_months = 6
+				_spawn_incident("kemalingan", t_target)
+
+func _pick_random_rc_building() -> Vector2i:
+	var cands: Array[Vector2i] = []
+	for y in range(CityData.GRID_SIZE):
+		for x in range(CityData.GRID_SIZE):
+			var t: Dictionary = city_data.get_tile(x, y)
+			var tp: int = int(t.get("type", CityData.TileType.EMPTY))
+			if int(t.get("level", 0)) > 0 and tp in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.BUILDING]:
+				cands.append(Vector2i(x, y))
+	if cands.is_empty():
+		return Vector2i(-1, -1)
+	return cands[randi() % cands.size()]
+
+func _spawn_incident(inc_type: String, pos: Vector2i) -> void:
+	var title_txt: String = "Kemalingan" if inc_type == "kemalingan" else ("Kerusuhan" if inc_type == "kerusuhan" else "Demo Warga")
+	var req_unit: String = "polisi"
+	city_data.insiden_aktif = {
+		"type": inc_type,
+		"title": title_txt,
+		"pos": pos,
+		"extra_pos": Vector2i(-1, -1),
+		"status": "Menunggu unit",
+		"unit_dispatched": false,
+		"tni_dispatched": false,
+		"months_elapsed": 0,
+		"months_left": 2 if inc_type == "kerusuhan" else 1,
+		"req_unit": req_unit
+	}
+	AudioManager.play_sfx(self, "complaint")
+	if citizen_manager:
+		var msg_type: String = ComplaintsData.COMPLAINT_EVENT_DEMO if inc_type == "demo" else ComplaintsData.COMPLAINT_INSECURE
+		citizen_manager.trigger_custom_complaint(msg_type, "Blok (%d, %d)" % [pos.x, pos.y])
+	show_toast.emit("%s terjadi di (%d, %d)! Cek Balai Kota / klik lokasi." % [title_txt, pos.x, pos.y])
+	_refresh_all_visuals()
+
+func _clear_active_incident() -> void:
+	city_data.insiden_aktif.clear()
+	if emergency_manager:
+		emergency_manager.recall_units_for_resolved_incident()
+	_refresh_all_visuals()
+	city_updated.emit(city_data)
+
+func _on_emergency_unit_arrived(kind: String, _target_pos: Vector2i) -> void:
+	if city_data.insiden_aktif.is_empty():
+		return
+	city_data.insiden_aktif["status"] = "Ditangani (%s di lokasi)" % kind.capitalize()
+	show_toast.emit("Unit %s tiba di lokasi!" % kind.capitalize())
+	city_updated.emit(city_data)
+
+func dispatch_unit_to_incident(kind: String) -> void:
+	if city_data.insiden_aktif.is_empty() or not emergency_manager:
+		return
+	var inc_type: String = str(city_data.insiden_aktif.get("type", ""))
+	if inc_type == "kerusuhan" and not bool(city_data.insiden_aktif.get("unit_dispatched", false)):
+		if city_data.money < 50000:
+			AudioManager.play_sfx(self, "error")
+			show_toast.emit("Uang kota tidak cukup")
+			return
+		city_data.money -= 50000
+
+	var target: Vector2i = city_data.insiden_aktif.get("pos", Vector2i(7, 7))
+	var res: Dictionary = emergency_manager.dispatch_unit(kind, target)
+	if not bool(res.get("ok", false)):
+		if inc_type == "kerusuhan" and not bool(city_data.insiden_aktif.get("unit_dispatched", false)):
+			city_data.money += 50000
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit(str(res.get("reason", "Unit tidak tersedia")))
+		return
+
+	if kind == "tni":
+		city_data.insiden_aktif["tni_dispatched"] = true
+		city_data.insiden_aktif["months_left"] = maxi(1, int(city_data.insiden_aktif.get("months_left", 2)) - 1)
+		show_toast.emit("Truk Bantuan TNI berangkat! Kerusuhan reda lebih cepat.")
+	else:
+		city_data.insiden_aktif["unit_dispatched"] = true
+		city_data.insiden_aktif["status"] = "%s berangkat" % kind.capitalize()
+		if inc_type == "kebakaran":
+			city_data.active_fire["had_damkar"] = true
+			city_data.active_fire["months_left"] = 1
+		elif inc_type == "demo":
+			city_data.insiden_aktif["months_left"] = 1
+		show_toast.emit("Unit %s berangkat menuju lokasi!" % kind.capitalize())
+	AudioManager.play_sfx(self, "click")
+	city_updated.emit(city_data)
+
+func handle_demo_demands() -> void:
+	if city_data.money < 30000:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Uang kota tidak cukup")
+		return
+	city_data.money -= 30000
+	city_data.popularity = clampf(city_data.popularity + 5.0, 0.0, 100.0)
+	if str(city_data.event_aktif.get("id", "")) == "demo":
+		city_data.event_aktif.clear()
+		_rebuild_event_visuals()
+	_clear_active_incident()
+	AudioManager.play_sfx(self, "build")
+	show_toast.emit("Tuntutan warga didengarkan! Demo bubar (Popularitas +5).")
+
+func ignore_active_incident() -> void:
+	if city_data.insiden_aktif.is_empty():
+		return
+	AudioManager.play_sfx(self, "click")
+	show_toast.emit("Insiden diabaikan untuk sementara — pantau kondisinya!")
 	city_updated.emit(city_data)
 
 func _refresh_underground_visuals() -> void:
@@ -1568,6 +1934,12 @@ func _process_city_events_monthly() -> void:
 		if cid == "banjir":
 			citizen_manager.trigger_custom_complaint(ComplaintsData.COMPLAINT_EVENT_BANJIR, "Jalan Raya")
 		elif cid == "demo":
+			var th_pos: Vector2i = Vector2i(7, 7)
+			var th_list: Array[Vector2i] = city_data.get_public_positions(CityData.TileType.TOWNHALL)
+			if not th_list.is_empty():
+				th_pos = th_list[0]
+			if city_data.insiden_aktif.is_empty():
+				_spawn_incident("demo", th_pos)
 			citizen_manager.trigger_custom_complaint(ComplaintsData.COMPLAINT_EVENT_DEMO, "Depan Balai Kota")
 
 func _rebuild_event_visuals() -> void:
@@ -1795,6 +2167,16 @@ func _build_landscape_visuals() -> void:
 		ground_tint.position = Vector3(16.0, 0.01, 4.0)
 		landscape_root.add_child(ground_tint)
 
+		var foot_dirt := MeshInstance3D.new()
+		var fd_box := BoxMesh.new()
+		fd_box.size = Vector3(32.0, 0.024, 2.2)
+		var fd_mat := StandardMaterial3D.new()
+		fd_mat.albedo_color = Color(0.45, 0.36, 0.26)
+		foot_dirt.mesh = fd_box
+		foot_dirt.material_override = fd_mat
+		foot_dirt.position = Vector3(16.0, 0.014, 4.2)
+		landscape_root.add_child(foot_dirt)
+
 		for y in range(3):
 			for x in range(CityData.GRID_SIZE):
 				if y <= 1 or (y == 2 and (x < 4 or x > 11)):
@@ -1804,7 +2186,7 @@ func _build_landscape_visuals() -> void:
 					m.position = CityData.tile_to_world_pos(x, y) + Vector3(0.0, 1.25, 0.0)
 					m.scale = Vector3(1.0, 1.3 if y == 0 else 0.85, 1.0)
 					landscape_root.add_child(m)
-		for px in [2, 5, 7, 10, 13]:
+		for px in [1, 3, 5, 7, 9, 11, 13, 15]:
 			var pine := S1VisualBuilder.create_tree(0)
 			pine.position = CityData.tile_to_world_pos(px, 3) + Vector3(-0.3, 0.0, -0.4)
 			landscape_root.add_child(pine)

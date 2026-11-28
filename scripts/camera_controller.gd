@@ -18,6 +18,10 @@ var yaw: float = 45.0
 var pitch: float = 45.0
 var zoom_distance: float = 22.0
 var focus_position: Vector3 = Vector3(16.0, 0.0, 16.0)
+var target_yaw: float = 45.0
+var target_pitch: float = 45.0
+var target_zoom: float = 22.0
+var target_focus: Vector3 = Vector3(16.0, 0.0, 16.0)
 var camera_mode: String = "theotown" # "theotown" | "bebas"
 
 var is_orbiting: bool = false
@@ -36,15 +40,17 @@ const LONG_PRESS_DURATION: float = 0.55
 func rotate_yaw(delta_deg: float) -> void:
 	if camera_mode == "theotown":
 		return
-	yaw = fposmod(yaw + delta_deg, 360.0)
-	_update_transform()
+	target_yaw = fposmod(target_yaw + delta_deg, 360.0)
 
 func set_camera_mode(mode: String, save_pref: bool = true) -> void:
 	camera_mode = "bebas" if mode == "bebas" else "theotown"
 	if camera_mode == "theotown":
-		yaw = 45.0
-		pitch = 45.0
-	_update_transform()
+		target_yaw = 45.0
+		target_pitch = 45.0
+	if not save_pref:
+		yaw = target_yaw
+		pitch = target_pitch
+		_update_transform()
 	if save_pref:
 		var s := SaveManager.load_settings()
 		s["camera_mode"] = camera_mode
@@ -52,8 +58,11 @@ func set_camera_mode(mode: String, save_pref: bool = true) -> void:
 
 func _ready() -> void:
 	var s := SaveManager.load_settings()
+	target_focus = focus_position
+	target_zoom = zoom_distance
 	set_camera_mode(str(s.get("camera_mode", "theotown")), false)
 	_clamp_focus()
+	focus_position = target_focus
 	_update_transform()
 
 func _process(delta: float) -> void:
@@ -69,12 +78,19 @@ func _process(delta: float) -> void:
 
 	if input_dir != Vector2.ZERO:
 		input_dir = input_dir.normalized()
-		var forward := -Vector3(sin(deg_to_rad(yaw)), 0.0, cos(deg_to_rad(yaw)))
-		var right := Vector3(cos(deg_to_rad(yaw)), 0.0, -sin(deg_to_rad(yaw)))
+		var forward := -Vector3(sin(deg_to_rad(target_yaw)), 0.0, cos(deg_to_rad(target_yaw)))
+		var right := Vector3(cos(deg_to_rad(target_yaw)), 0.0, -sin(deg_to_rad(target_yaw)))
 		var move := (right * input_dir.x + forward * -input_dir.y) * pan_speed * delta
-		focus_position += move
+		target_focus += move
 		_clamp_focus()
-		_update_transform()
+
+	# Haluskan pergerakan kamera (pan, zoom, orbit) ala GTA/TheoTown
+	var smooth_t: float = clampf(delta * 12.0, 0.0, 1.0)
+	focus_position = focus_position.lerp(target_focus, smooth_t)
+	zoom_distance = lerpf(zoom_distance, target_zoom, smooth_t)
+	pitch = lerpf(pitch, target_pitch, smooth_t)
+	yaw = rad_to_deg(lerp_angle(deg_to_rad(yaw), deg_to_rad(target_yaw), smooth_t))
+	_update_transform()
 
 	# Cek long-press 1 jari di peta
 	if _map_touches.size() == 1 and _all_touches.size() <= 1:
@@ -107,8 +123,7 @@ func _input(event: InputEvent) -> void:
 			var dist: float = (pts[0] as Vector2).distance_to(pts[1] as Vector2)
 			if _prev_pinch_dist > 0.0:
 				var diff: float = dist - _prev_pinch_dist
-				zoom_distance = clampf(zoom_distance - diff * 0.04, min_zoom, max_zoom)
-				_update_transform()
+				target_zoom = clampf(target_zoom - diff * 0.04, min_zoom, max_zoom)
 			_prev_pinch_dist = dist
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -139,13 +154,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			if not td["moved"] and sd.position.distance_to(td["start_pos"]) > 10.0:
 				td["moved"] = true
 			if td["moved"]:
-				var forward := -Vector3(sin(deg_to_rad(yaw)), 0.0, cos(deg_to_rad(yaw)))
-				var right := Vector3(cos(deg_to_rad(yaw)), 0.0, -sin(deg_to_rad(yaw)))
-				var drag_scale := 0.028 * (zoom_distance / 22.0)
+				var forward := -Vector3(sin(deg_to_rad(target_yaw)), 0.0, cos(deg_to_rad(target_yaw)))
+				var right := Vector3(cos(deg_to_rad(target_yaw)), 0.0, -sin(deg_to_rad(target_yaw)))
+				var drag_scale := 0.028 * (target_zoom / 22.0)
 				var move := (-right * sd.relative.x + forward * sd.relative.y) * drag_scale
-				focus_position += move
+				target_focus += move
 				_clamp_focus()
-				_update_transform()
 		return
 
 	# Kontrol Mouse untuk Laptop (abaikan mouse emulasi dari sentuhan agar tidak dobel)
@@ -168,21 +182,18 @@ func _unhandled_input(event: InputEvent) -> void:
 				lmb_pressed = false
 				is_panning = false
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom_distance = clampf(zoom_distance - zoom_step, min_zoom, max_zoom)
-			_update_transform()
+			target_zoom = clampf(target_zoom - zoom_step, min_zoom, max_zoom)
 		elif mb.pressed and mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom_distance = clampf(zoom_distance + zoom_step, min_zoom, max_zoom)
-			_update_transform()
+			target_zoom = clampf(target_zoom + zoom_step, min_zoom, max_zoom)
 
 	elif event is InputEventMouseMotion:
 		var mm := event as InputEventMouseMotion
 		if mm.device == InputEvent.DEVICE_ID_EMULATION:
 			return
 		if is_orbiting and camera_mode == "bebas":
-			yaw -= mm.relative.x * orbit_sensitivity
-			yaw = fposmod(yaw, 360.0)
-			pitch = clampf(pitch - mm.relative.y * orbit_sensitivity, min_pitch, max_pitch)
-			_update_transform()
+			target_yaw -= mm.relative.x * orbit_sensitivity
+			target_yaw = fposmod(target_yaw, 360.0)
+			target_pitch = clampf(target_pitch - mm.relative.y * orbit_sensitivity, min_pitch, max_pitch)
 		elif lmb_pressed:
 			if Input.is_key_pressed(KEY_SHIFT):
 				is_panning = true
@@ -193,18 +204,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				if mm.position.distance_to(lmb_down_pos) > 5.0:
 					is_panning = true
 			if is_panning:
-				var forward := -Vector3(sin(deg_to_rad(yaw)), 0.0, cos(deg_to_rad(yaw)))
-				var right := Vector3(cos(deg_to_rad(yaw)), 0.0, -sin(deg_to_rad(yaw)))
-				var drag_scale := 0.025 * (zoom_distance / 22.0)
+				var forward := -Vector3(sin(deg_to_rad(target_yaw)), 0.0, cos(deg_to_rad(target_yaw)))
+				var right := Vector3(cos(deg_to_rad(target_yaw)), 0.0, -sin(deg_to_rad(target_yaw)))
+				var drag_scale := 0.025 * (target_zoom / 22.0)
 				var move := (-right * mm.relative.x + forward * mm.relative.y) * drag_scale
-				focus_position += move
+				target_focus += move
 				_clamp_focus()
-				_update_transform()
 
 func _clamp_focus() -> void:
-	focus_position.x = clampf(focus_position.x, -24.0, CityData.MAP_SIZE + 24.0)
-	focus_position.z = clampf(focus_position.z, -24.0, CityData.MAP_SIZE + 24.0)
-	focus_position.y = 0.0
+	target_focus.x = clampf(target_focus.x, -24.0, CityData.MAP_SIZE + 24.0)
+	target_focus.z = clampf(target_focus.z, -24.0, CityData.MAP_SIZE + 24.0)
+	target_focus.y = 0.0
 
 func _update_transform() -> void:
 	var b := Basis.IDENTITY

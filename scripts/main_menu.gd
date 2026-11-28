@@ -180,7 +180,7 @@ func _build_mode_and_season_views() -> void:
 	solo_container.add_theme_constant_override("separation", 10)
 	view_root.add_child(solo_container)
 
-	var solo_hint: String = "" if has_s2 else "Belum ada kota tersimpan"
+	var solo_hint: String = "" if has_s2 else "Belum ada kota"
 	var solo_card := _make_season_card(
 		"Mode Solo — KotaBareng",
 		"Bangun kota bebas tanpa karier & pemilu (Modal awal Rp 500.000, Popularitas 70)",

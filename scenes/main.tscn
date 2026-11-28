@@ -26,8 +26,8 @@ ambient_light_sky_contribution = 0.5
 tonemap_mode = 2
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
-albedo_color = Color(0.28, 0.58, 0.25, 1)
-roughness = 0.9
+albedo_color = Color(0.25, 0.48, 0.23, 1)
+roughness = 0.92
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 material = SubResource("StandardMaterial3D_ground")
@@ -42,8 +42,8 @@ material = SubResource("StandardMaterial3D_trunk")
 size = Vector3(0.5, 2, 0.5)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_foliage"]
-albedo_color = Color(0.18, 0.65, 0.22, 1)
-roughness = 0.8
+albedo_color = Color(0.20, 0.52, 0.22, 1)
+roughness = 0.85
 
 [sub_resource type="BoxMesh" id="BoxMesh_foliage"]
 material = SubResource("StandardMaterial3D_foliage")

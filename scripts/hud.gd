@@ -99,6 +99,13 @@ var stats_modal: PanelContainer = null
 var stats_vbox: VBoxContainer = null
 var photo_helper: PhotoModeHelper = null
 var _prev_speed_before_photo: float = 1.0
+var farm_info_modal: PanelContainer = null
+var lbl_fi_title: Label = null
+var lbl_fi_status: Label = null
+var lbl_fi_reason: Label = null
+var lbl_fi_warehouse: Label = null
+var btn_fi_harvest: Button = null
+var _selected_farm_pos: Vector2i = Vector2i(-1, -1)
 
 # Overlay Bubble Chat 2D (Langkah 5: maks 3 bubble, anti-tumpuk, clamp viewport)
 const MAX_BUBBLES: int = 3
@@ -112,6 +119,10 @@ var settings_modal: PanelContainer = null
 var _prev_speed_before_pause: float = 1.0
 var region_buy_modal: PanelContainer = null
 var lbl_region_buy: Label = null
+var unit_modal: PanelContainer = null
+var unit_vbox: VBoxContainer = null
+var incident_modal: PanelContainer = null
+var incident_vbox: VBoxContainer = null
 var _pending_region: Vector2i = Vector2i.ZERO
 
 func _ready() -> void:
@@ -126,6 +137,8 @@ func _ready() -> void:
 		city_manager.move_mode_changed.connect(_on_move_mode_changed)
 		city_manager.map_tapped.connect(_close_category_popup)
 		city_manager.time_weather_updated.connect(_on_time_weather_updated)
+		city_manager.open_farm_info_modal.connect(_open_farm_info_dialog)
+		city_manager.open_incident_modal.connect(_open_incident_dialog)
 
 	tool_buttons = {
 		CityManager.ToolMode.ROAD: btn_road,
@@ -280,6 +293,7 @@ func _ready() -> void:
 	_setup_mission_panel()
 	_setup_pause_and_settings()
 	_setup_region_buy_modal()
+	_setup_unit_and_incident_modals()
 	_setup_touch_controls()
 	_polish_hud_topbar()
 	_select_tool(CityManager.ToolMode.ROAD)
@@ -288,15 +302,18 @@ func _ready() -> void:
 		_on_city_updated(city_manager.city_data)
 
 func _select_tool(mode: CityManager.ToolMode) -> void:
-	if city_manager and city_manager.current_tool != mode:
+	var final_mode: CityManager.ToolMode = mode
+	if city_manager and city_manager.current_tool == mode and mode != CityManager.ToolMode.NONE:
+		final_mode = CityManager.ToolMode.NONE
+	if city_manager and city_manager.current_tool != final_mode:
 		AudioManager.play_sfx(self, "click")
 	if city_manager:
-		city_manager.set_tool(mode)
+		city_manager.set_tool(final_mode)
 
 	for m in tool_buttons:
 		var btn: Button = tool_buttons[m]
-		var is_sel: bool = (m == mode)
-		var sb := UIThemeHelper.make_panel_style(is_sel, 12, 8.0, 6.0, 0.96 if is_sel else 0.88)
+		var is_sel: bool = (m == final_mode)
+		var sb: StyleBoxFlat = UIThemeHelper.make_panel_style(is_sel, 12, 8.0, 6.0, 0.96 if is_sel else 0.88)
 		if is_sel:
 			sb.bg_color = Color(0.20, 0.22, 0.30, 0.98)
 		btn.add_theme_stylebox_override("normal", sb)
@@ -305,7 +322,7 @@ func _select_tool(mode: CityManager.ToolMode) -> void:
 
 	_refresh_category_highlights()
 	if btn_rotate_preview and city_manager:
-		btn_rotate_preview.visible = city_manager._is_rotatable_tool(mode) or (city_manager.moving_from_pos != Vector2i(-1, -1))
+		btn_rotate_preview.visible = city_manager._is_rotatable_tool(final_mode) or (city_manager.moving_from_pos != Vector2i(-1, -1))
 
 func _select_speed(speed: float) -> void:
 	if city_manager:
@@ -325,6 +342,8 @@ func _on_tax_slider_changed(val: float) -> void:
 		city_manager.set_tax_rate(float(rounded_pct) / 100.0)
 
 func _on_city_updated(data: CityData) -> void:
+	if photo_helper and photo_helper.active:
+		return
 	label_money.text = "Rp " + _format_number(data.money)
 	label_pop.text = "Pop: " + str(data.population)
 
@@ -553,6 +572,30 @@ func _refresh_townhall_list() -> void:
 		child.queue_free()
 
 	var has_items := false
+
+	# 0. Kartu Insiden Aktif (Kebakaran / Kemalingan / Kerusuhan / Demo)
+	if not data.insiden_aktif.is_empty():
+		has_items = true
+		var inc_title: String = str(data.insiden_aktif.get("title", "Insiden"))
+		var inc_pos: Vector2i = data.insiden_aktif.get("pos", Vector2i(0, 0))
+		var inc_status: String = str(data.insiden_aktif.get("status", "Aktif"))
+		var inc_action := func():
+			townhall_modal.visible = false
+			_open_incident_dialog()
+		var inc_card := _create_complaint_card(
+			"INSIDEN: %s" % inc_title,
+			"Blok (%d, %d)" % [inc_pos.x, inc_pos.y],
+			"Butuh penanganan unit darurat / keputusan Walikota!",
+			inc_status,
+			Color(0.96, 0.30, 0.25),
+			[
+				{
+					"title": "Tangani / Kirim Unit",
+					"action": inc_action
+				}
+			]
+		)
+		th_complaints_container.add_child(inc_card)
 
 	# 1. Kartu Parkir Liar Pak Slamet (jika sedang aktif)
 	if data.pak_slamet_status.get("state") == "active":
@@ -950,6 +993,7 @@ func _setup_utility_buttons() -> void:
 
 	_setup_rotate_move_controls()
 	_setup_building_info_modal()
+	_setup_farm_info_modal()
 	_setup_event_modal()
 	_setup_stats_modal()
 	_setup_photo_mode()
@@ -1107,7 +1151,103 @@ func _update_building_info_text(tile_info: Dictionary) -> void:
 	var util_txt: String = "Aktif" if tile_info.get("has_utility", true) else "Kurang Listrik/Air!"
 	lbl_bi_info.text = "Arah hadap: %d°  |  Utilitas: %s" % [rot, util_txt]
 
+func _setup_farm_info_modal() -> void:
+	farm_info_modal = PanelContainer.new()
+	farm_info_modal.visible = false
+	farm_info_modal.set_anchors_preset(Control.PRESET_CENTER)
+	farm_info_modal.custom_minimum_size = Vector2(360, 0)
+	farm_info_modal.offset_left = -180.0
+	farm_info_modal.offset_top = -125.0
+	farm_info_modal.offset_right = 180.0
+	farm_info_modal.offset_bottom = 125.0
+	farm_info_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 16, 18.0, 14.0, 0.96))
+	add_child(farm_info_modal)
+
+	var vb: VBoxContainer = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 8)
+	farm_info_modal.add_child(vb)
+
+	lbl_fi_title = Label.new()
+	lbl_fi_title.text = "Lahan Gandum"
+	lbl_fi_title.add_theme_font_size_override("font_size", 18)
+	lbl_fi_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.28))
+	vb.add_child(lbl_fi_title)
+
+	lbl_fi_status = Label.new()
+	lbl_fi_status.add_theme_font_size_override("font_size", 14)
+	vb.add_child(lbl_fi_status)
+
+	lbl_fi_warehouse = Label.new()
+	lbl_fi_warehouse.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_fi_warehouse.add_theme_font_size_override("font_size", 12)
+	lbl_fi_warehouse.add_theme_color_override("font_color", Color(0.80, 0.84, 0.90))
+	vb.add_child(lbl_fi_warehouse)
+
+	btn_fi_harvest = Button.new()
+	btn_fi_harvest.text = "Panen"
+	UIThemeHelper.apply_btn_primary(btn_fi_harvest, 44.0)
+	btn_fi_harvest.pressed.connect(func():
+		if city_manager and _selected_farm_pos != Vector2i(-1, -1):
+			if city_manager.harvest_farm_at(_selected_farm_pos.x, _selected_farm_pos.y):
+				farm_info_modal.visible = false
+	)
+	vb.add_child(btn_fi_harvest)
+
+	lbl_fi_reason = Label.new()
+	lbl_fi_reason.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_fi_reason.add_theme_font_size_override("font_size", 12)
+	lbl_fi_reason.add_theme_color_override("font_color", Color(0.70, 0.74, 0.80))
+	vb.add_child(lbl_fi_reason)
+
+	var hb: HBoxContainer = HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 8)
+	vb.add_child(hb)
+
+	var btn_del: Button = Button.new()
+	btn_del.text = "Hapus Lahan"
+	btn_del.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_secondary(btn_del, 36.0)
+	btn_del.pressed.connect(func():
+		if city_manager and _selected_farm_pos != Vector2i(-1, -1):
+			city_manager.bulldoze_farm_at(_selected_farm_pos.x, _selected_farm_pos.y)
+		farm_info_modal.visible = false
+	)
+	hb.add_child(btn_del)
+
+	var btn_close: Button = Button.new()
+	btn_close.text = "Tutup"
+	btn_close.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_secondary(btn_close, 36.0)
+	btn_close.pressed.connect(func(): farm_info_modal.visible = false)
+	hb.add_child(btn_close)
+
+func _open_farm_info_dialog(tile_pos: Vector2i, tile_info: Dictionary) -> void:
+	if not farm_info_modal or not city_manager or not city_manager.city_data:
+		return
+	_selected_farm_pos = tile_pos
+	var lv: int = int(tile_info.get("level", 1))
+	lbl_fi_title.text = "Lahan Gandum (%d, %d)" % [tile_pos.x, tile_pos.y]
+	if lv >= 3:
+		lbl_fi_status.text = "Siap Panen!"
+		btn_fi_harvest.disabled = false
+		lbl_fi_reason.visible = false
+	elif lv == 2:
+		lbl_fi_status.text = "Tumbuh — siap panen dalam 1 bulan"
+		btn_fi_harvest.disabled = true
+		lbl_fi_reason.text = "Belum siap — 1 bulan lagi"
+		lbl_fi_reason.visible = true
+	else:
+		lbl_fi_status.text = "Benih — siap panen dalam 2 bulan"
+		btn_fi_harvest.disabled = true
+		lbl_fi_reason.text = "Belum siap — 2 bulan lagi"
+		lbl_fi_reason.visible = true
+	var d: CityData = city_manager.city_data
+	lbl_fi_warehouse.text = "Gudang: %d unit gandum — harga jual saat ini Rp %s/unit" % [d.wheat_inventory, _format_number(d.wheat_price)]
+	farm_info_modal.visible = true
+
 func _on_time_weather_updated(month: int, year: int, jam: float, cuaca: String) -> void:
+	if photo_helper and photo_helper.active:
+		return
 	if label_date:
 		label_date.text = "Bln %d Th %d • %02d:00" % [month, year, int(jam)]
 	_update_weather_icon(cuaca)
@@ -1367,17 +1507,18 @@ func _setup_photo_mode() -> void:
 		top_hbox.move_child(btn_ph, btn_townhall.get_index())
 
 	var hide_list: Array = []
-	for p_name in ["TopPanel", "RightPanel", "TimeSpeedPanel", "TaxPanel", "FarmPanel", "BottomPalette", "MissionPanel", "BubbleOverlay", "CategoryPopup", "TouchControls"]:
+	for p_name in ["TopPanel", "RightPanel", "TimeSpeedPanel", "TaxPanel", "FarmPanel", "BottomPalette", "MissionPanel", "BubbleOverlay", "CategoryPopup", "TouchControls", "CameraRotateBox", "ToastLabel"]:
 		var nd: Node = get_node_or_null(p_name)
 		if nd:
 			hide_list.append(nd)
 
 	photo_helper = PhotoModeHelper.new()
+	photo_helper.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(photo_helper)
 	photo_helper.setup(hide_list, func() -> Dictionary:
 		if not city_manager or not city_manager.city_data:
 			return {}
-		var d := city_manager.city_data
+		var d: CityData = city_manager.city_data
 		return {
 			"tier": d.city_level,
 			"pop": d.population,
@@ -1385,16 +1526,22 @@ func _setup_photo_mode() -> void:
 		}
 	)
 	photo_helper.photo_mode_toggled.connect(func(is_on: bool):
-		if city_manager and city_manager.city_data:
-			if is_on:
-				_prev_speed_before_photo = city_manager.city_data.game_speed
-				city_manager.set_game_speed(0.0)
-			else:
-				city_manager.set_game_speed(_prev_speed_before_photo)
+		if is_on:
+			_close_category_popup()
+			_close_stats_modal()
+			if event_modal:
+				event_modal.visible = false
+			if building_info_modal:
+				building_info_modal.visible = false
+		if get_tree():
+			get_tree().paused = is_on
+		if city_manager and city_manager.camera_controller:
+			city_manager.camera_controller.process_mode = Node.PROCESS_MODE_ALWAYS if is_on else Node.PROCESS_MODE_INHERIT
 	)
 	photo_helper.rotate_camera_requested.connect(func():
 		if city_manager and city_manager.camera_controller:
-			city_manager.camera_controller.rotation.y += PI * 0.25
+			city_manager.camera_controller.yaw = fposmod(city_manager.camera_controller.yaw + 45.0, 360.0)
+			city_manager.camera_controller._update_transform()
 	)
 
 func _format_number(val: int) -> String:
@@ -1474,6 +1621,8 @@ func _on_bubble_clicked(slot_idx: int) -> void:
 			open_citizen_profile_dialog(walker.citizen_data, walker.active_complaint)
 
 func _process(_delta: float) -> void:
+	if photo_helper and photo_helper.active:
+		return
 	_update_screen_bubbles()
 
 func _update_screen_bubbles() -> void:
@@ -1849,12 +1998,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			citizen_modal.visible = false
 		elif building_info_modal and building_info_modal.visible:
 			building_info_modal.visible = false
+		elif farm_info_modal and farm_info_modal.visible:
+			farm_info_modal.visible = false
 		elif stats_modal and stats_modal.visible:
 			_close_stats_modal()
 		elif event_modal and event_modal.visible:
 			event_modal.visible = false
 		elif category_popup and category_popup.visible:
 			_close_category_popup()
+		elif city_manager and city_manager.current_tool != CityManager.ToolMode.NONE:
+			_select_tool(CityManager.ToolMode.NONE)
 		else:
 			_toggle_pause_menu()
 		get_viewport().set_input_as_handled()
@@ -1963,3 +2116,206 @@ func _open_region_buy_dialog(reg: Vector2i, price: int) -> void:
 		lbl_region_buy.text = "Buka wilayah baru (16x16 tile)? Harga Rp %s. Lanjutkan?" % _format_number(price)
 	if region_buy_modal:
 		region_buy_modal.visible = true
+
+func _setup_unit_and_incident_modals() -> void:
+	var top_hbox: HBoxContainer = get_node_or_null("TopPanel/HBox") as HBoxContainer
+	if top_hbox and btn_townhall:
+		var btn_unit := Button.new()
+		btn_unit.name = "BtnUnit"
+		btn_unit.text = "Unit"
+		btn_unit.custom_minimum_size = Vector2(52, 30)
+		btn_unit.add_theme_font_size_override("font_size", 12)
+		UIThemeHelper.apply_btn_secondary(btn_unit, 30.0)
+		btn_unit.pressed.connect(_open_unit_dialog)
+		top_hbox.add_child(btn_unit)
+		top_hbox.move_child(btn_unit, btn_townhall.get_index())
+
+	unit_modal = PanelContainer.new()
+	unit_modal.name = "UnitModal"
+	unit_modal.visible = false
+	unit_modal.set_anchors_preset(Control.PRESET_CENTER)
+	unit_modal.offset_left = -225.0
+	unit_modal.offset_top = -170.0
+	unit_modal.offset_right = 225.0
+	unit_modal.offset_bottom = 170.0
+	unit_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 18, 18.0, 14.0, 0.96))
+	add_child(unit_modal)
+
+	var u_wrap := VBoxContainer.new()
+	u_wrap.add_theme_constant_override("separation", 8)
+	unit_modal.add_child(u_wrap)
+	u_wrap.add_child(UIThemeHelper.make_panel_header("Unit Darurat Kota", "warn"))
+	u_wrap.add_child(HSeparator.new())
+	var u_scroll := ScrollContainer.new()
+	u_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	u_wrap.add_child(u_scroll)
+	unit_vbox = VBoxContainer.new()
+	unit_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	unit_vbox.add_theme_constant_override("separation", 6)
+	u_scroll.add_child(unit_vbox)
+	var btn_u_close := Button.new()
+	btn_u_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_u_close, 40.0)
+	btn_u_close.pressed.connect(func(): unit_modal.visible = false)
+	u_wrap.add_child(btn_u_close)
+
+	incident_modal = PanelContainer.new()
+	incident_modal.name = "IncidentModal"
+	incident_modal.visible = false
+	incident_modal.set_anchors_preset(Control.PRESET_CENTER)
+	incident_modal.offset_left = -225.0
+	incident_modal.offset_top = -175.0
+	incident_modal.offset_right = 225.0
+	incident_modal.offset_bottom = 175.0
+	incident_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 18, 18.0, 14.0, 0.96))
+	add_child(incident_modal)
+
+	var i_wrap := VBoxContainer.new()
+	i_wrap.add_theme_constant_override("separation", 8)
+	incident_modal.add_child(i_wrap)
+	i_wrap.add_child(UIThemeHelper.make_panel_header("Penanganan Insiden", "warn"))
+	i_wrap.add_child(HSeparator.new())
+	incident_vbox = VBoxContainer.new()
+	incident_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	incident_vbox.add_theme_constant_override("separation", 6)
+	i_wrap.add_child(incident_vbox)
+	var btn_i_close := Button.new()
+	btn_i_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_i_close, 40.0)
+	btn_i_close.pressed.connect(func(): incident_modal.visible = false)
+	i_wrap.add_child(btn_i_close)
+
+func _open_unit_dialog() -> void:
+	if not unit_modal:
+		return
+	unit_modal.visible = true
+	_refresh_unit_modal()
+
+func _refresh_unit_modal() -> void:
+	if not unit_vbox or not city_manager:
+		return
+	for ch in unit_vbox.get_children():
+		ch.queue_free()
+	var em: EmergencyUnitManager = city_manager.emergency_manager
+	if not em or em.units.is_empty():
+		var empty_lbl := Label.new()
+		empty_lbl.text = "Belum ada unit darurat.\nBangun Damkar, Kantor Polisi, Puskesmas/RS, atau Markas TNI."
+		empty_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		unit_vbox.add_child(empty_lbl)
+		return
+	for u in em.units:
+		var lbl := Label.new()
+		lbl.text = "• %s (%s) — %s" % [u.kind.capitalize(), u.home_name, u.status]
+		lbl.add_theme_font_size_override("font_size", 13)
+		unit_vbox.add_child(lbl)
+	if not city_manager.city_data.insiden_aktif.is_empty():
+		var btn_go := Button.new()
+		btn_go.text = "Buka Panel Insiden Aktif"
+		UIThemeHelper.apply_btn_primary(btn_go, 42.0)
+		btn_go.pressed.connect(func():
+			unit_modal.visible = false
+			_open_incident_dialog()
+		)
+		unit_vbox.add_child(btn_go)
+
+func _open_incident_dialog() -> void:
+	if not incident_modal:
+		return
+	incident_modal.visible = true
+	_refresh_incident_modal()
+
+func _refresh_incident_modal() -> void:
+	if not incident_vbox or not city_manager or not city_manager.city_data:
+		return
+	for ch in incident_vbox.get_children():
+		ch.queue_free()
+	var data: CityData = city_manager.city_data
+	if data.insiden_aktif.is_empty():
+		var none_lbl := Label.new()
+		none_lbl.text = "Tidak ada insiden aktif saat ini."
+		incident_vbox.add_child(none_lbl)
+		return
+
+	var inc: Dictionary = data.insiden_aktif
+	var inc_type: String = str(inc.get("type", ""))
+	var inc_pos: Vector2i = inc.get("pos", Vector2i(0, 0))
+	var em: EmergencyUnitManager = city_manager.emergency_manager
+	var req_kind: String = "damkar" if inc_type == "kebakaran" else "polisi"
+	var eta_txt: String = em.get_unit_eta_text(req_kind) if em else "-"
+
+	var info := Label.new()
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_theme_font_size_override("font_size", 13)
+	info.text = "Jenis: %s\nLokasi: Blok (%d, %d)\nStatus: %s\nETA Unit: %s" % [
+		str(inc.get("title", inc_type)),
+		inc_pos.x,
+		inc_pos.y,
+		str(inc.get("status", "Menunggu")),
+		eta_txt
+	]
+	incident_vbox.add_child(info)
+
+	if inc_type == "kebakaran":
+		_add_unit_dispatch_btn("Kirim Damkar", "damkar", 0)
+	elif inc_type == "kemalingan":
+		_add_unit_dispatch_btn("Kirim Polisi", "polisi", 0)
+	elif inc_type == "kerusuhan":
+		_add_unit_dispatch_btn("Kirim Polisi (Rp 50.000)", "polisi", 50000)
+		if em and em.has_unit_kind("tni"):
+			_add_unit_dispatch_btn("Kirim Bantuan TNI", "tni", 0)
+	elif inc_type == "demo":
+		var btn_dem := Button.new()
+		if data.money < 30000:
+			btn_dem.text = "Uang kota tidak cukup"
+			btn_dem.disabled = true
+			UIThemeHelper.apply_btn_secondary(btn_dem, 42.0)
+		else:
+			btn_dem.text = "Dengarkan Tuntutan (Rp 30.000)"
+			UIThemeHelper.apply_btn_primary(btn_dem, 42.0)
+			btn_dem.pressed.connect(func():
+				city_manager.handle_demo_demands()
+				incident_modal.visible = false
+			)
+		incident_vbox.add_child(btn_dem)
+		_add_unit_dispatch_btn("Kirim Polisi Menenangkan", "polisi", 0)
+
+	var btn_ign := Button.new()
+	btn_ign.text = "Abaikan"
+	UIThemeHelper.apply_btn_secondary(btn_ign, 38.0)
+	btn_ign.pressed.connect(func():
+		city_manager.ignore_active_incident()
+		incident_modal.visible = false
+	)
+	incident_vbox.add_child(btn_ign)
+
+func _add_unit_dispatch_btn(label_txt: String, kind: String, cost: int) -> void:
+	var btn := Button.new()
+	var data: CityData = city_manager.city_data
+	var em: EmergencyUnitManager = city_manager.emergency_manager
+	if cost > 0 and data.money < cost:
+		btn.text = "Uang kota tidak cukup"
+		btn.disabled = true
+		UIThemeHelper.apply_btn_secondary(btn, 42.0)
+	elif not em or not em.has_unit_kind(kind):
+		if kind == "damkar":
+			btn.text = "Bangun Damkar dulu"
+		elif kind == "polisi":
+			btn.text = "Bangun Kantor Polisi dulu"
+		elif kind == "tni":
+			btn.text = "Bangun Markas TNI dulu"
+		else:
+			btn.text = "Bangun RS / Puskesmas dulu"
+		btn.disabled = true
+		UIThemeHelper.apply_btn_secondary(btn, 42.0)
+	elif em.is_any_unit_busy(kind):
+		btn.text = "Unit sedang bertugas"
+		btn.disabled = true
+		UIThemeHelper.apply_btn_secondary(btn, 42.0)
+	else:
+		btn.text = label_txt
+		UIThemeHelper.apply_btn_primary(btn, 42.0)
+		btn.pressed.connect(func():
+			city_manager.dispatch_unit_to_incident(kind)
+			_refresh_incident_modal()
+		)
+	incident_vbox.add_child(btn)
