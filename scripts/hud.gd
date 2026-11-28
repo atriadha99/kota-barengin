@@ -384,7 +384,7 @@ func _on_city_updated(data: CityData) -> void:
 	else:
 		label_water.modulate = Color(0.9, 0.9, 0.9)
 
-	label_date.text = "Bln %d Th %d • %02d:00" % [data.month, data.year, int(data.waktu_jam)]
+	label_date.text = "Bln %d Th %d • %s • %02d:00" % [data.month, data.year, data.city_level, int(data.waktu_jam)]
 	_update_weather_icon(data.cuaca_saat_ini)
 	label_tier.text = "[" + data.city_level + "]"
 
@@ -728,15 +728,18 @@ func _polish_hud_topbar() -> void:
 
 	var top_panel := get_node_or_null("TopPanel") as PanelContainer
 	if top_panel:
+		top_panel.anchor_left = 0.0
+		top_panel.anchor_right = 1.0
 		top_panel.offset_left = 8.0
 		top_panel.offset_right = -8.0
-		top_panel.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 14, 8.0, 6.0, 0.92))
+		top_panel.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 14, 6.0, 4.0, 0.92))
 
 	var top_hbox := get_node_or_null("TopPanel/HBox") as HBoxContainer
 	if not top_hbox:
 		return
 
-	top_hbox.add_theme_constant_override("separation", 4)
+	top_hbox.add_theme_constant_override("separation", 3)
+	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	for child in top_hbox.get_children():
 		if child is VSeparator:
 			child.visible = false
@@ -750,11 +753,15 @@ func _polish_hud_topbar() -> void:
 		"LabelWater": "water",
 		"LabelDate": "date"
 	}
-	var chip_style := UIThemeHelper.make_chip_style()
+	var chip_style: StyleBoxFlat = UIThemeHelper.make_chip_style()
+	chip_style.content_margin_left = 6.0
+	chip_style.content_margin_right = 6.0
+	chip_style.content_margin_top = 3.0
+	chip_style.content_margin_bottom = 3.0
 	for lbl in [label_money, label_pop, label_happiness, label_popularity, label_power, label_water, label_date, label_tier]:
 		if not lbl or not is_instance_valid(lbl):
 			continue
-		lbl.add_theme_font_size_override("font_size", 13)
+		lbl.add_theme_font_size_override("font_size", 12)
 		var idx: int = lbl.get_index()
 		var chip := PanelContainer.new()
 		chip.add_theme_stylebox_override("panel", chip_style)
@@ -771,10 +778,12 @@ func _polish_hud_topbar() -> void:
 		chbox.add_child(lbl)
 		top_hbox.add_child(chip)
 		top_hbox.move_child(chip, idx)
+		if lbl == label_tier:
+			chip.visible = false
 
 	if btn_townhall:
-		btn_townhall.custom_minimum_size = Vector2(92, 30)
-		btn_townhall.add_theme_font_size_override("font_size", 12)
+		btn_townhall.custom_minimum_size = Vector2(82, 28)
+		btn_townhall.add_theme_font_size_override("font_size", 11)
 
 	if btn_sell_wheat:
 		UIThemeHelper.apply_btn_primary(btn_sell_wheat, 40.0)
@@ -784,7 +793,7 @@ func _polish_hud_topbar() -> void:
 		label_security = Label.new()
 		label_security.name = "LabelSecurity"
 		label_security.text = "Aman: 50%"
-		label_security.add_theme_font_size_override("font_size", 13)
+		label_security.add_theme_font_size_override("font_size", 12)
 		var sec_chip := PanelContainer.new()
 		sec_chip.add_theme_stylebox_override("panel", chip_style)
 		var sch := HBoxContainer.new()
@@ -1270,9 +1279,9 @@ func _setup_event_modal() -> void:
 		var btn_ev := Button.new()
 		btn_ev.name = "BtnEvent"
 		btn_ev.text = "Event"
-		btn_ev.custom_minimum_size = Vector2(56, 30)
-		btn_ev.add_theme_font_size_override("font_size", 12)
-		UIThemeHelper.apply_btn_secondary(btn_ev, 30.0)
+		btn_ev.custom_minimum_size = Vector2(46, 28)
+		btn_ev.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(btn_ev, 28.0)
 		btn_ev.pressed.connect(_open_event_modal)
 		top_hbox.add_child(btn_ev)
 		top_hbox.move_child(btn_ev, btn_townhall.get_index())
@@ -1364,9 +1373,9 @@ func _setup_stats_modal() -> void:
 		var btn_st := Button.new()
 		btn_st.name = "BtnStats"
 		btn_st.text = "Stat"
-		btn_st.custom_minimum_size = Vector2(48, 30)
-		btn_st.add_theme_font_size_override("font_size", 12)
-		UIThemeHelper.apply_btn_secondary(btn_st, 30.0)
+		btn_st.custom_minimum_size = Vector2(42, 28)
+		btn_st.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(btn_st, 28.0)
 		btn_st.pressed.connect(_open_stats_modal)
 		top_hbox.add_child(btn_st)
 		top_hbox.move_child(btn_st, btn_townhall.get_index())
@@ -1481,24 +1490,24 @@ func _setup_photo_mode() -> void:
 		var btn_cam := Button.new()
 		btn_cam.name = "BtnCamMode"
 		var cur_cm: String = city_manager.camera_controller.camera_mode if (city_manager and city_manager.camera_controller) else "theotown"
-		btn_cam.text = "Kam: Bebas" if cur_cm == "bebas" else "Kam: TheoTown"
-		btn_cam.custom_minimum_size = Vector2(88, 30)
+		btn_cam.text = "Kam: Bebas" if cur_cm == "bebas" else "Kam: Theo"
+		btn_cam.custom_minimum_size = Vector2(72, 28)
 		btn_cam.add_theme_font_size_override("font_size", 11)
-		UIThemeHelper.apply_btn_secondary(btn_cam, 30.0)
+		UIThemeHelper.apply_btn_secondary(btn_cam, 28.0)
 		btn_cam.pressed.connect(func():
 			if city_manager and city_manager.camera_controller:
 				var next_m := "bebas" if city_manager.camera_controller.camera_mode == "theotown" else "theotown"
 				city_manager.camera_controller.set_camera_mode(next_m)
-				btn_cam.text = "Kam: Bebas" if next_m == "bebas" else "Kam: TheoTown"
+				btn_cam.text = "Kam: Bebas" if next_m == "bebas" else "Kam: Theo"
 		)
 		top_hbox.add_child(btn_cam)
 		top_hbox.move_child(btn_cam, btn_townhall.get_index())
 
 		btn_ph.name = "BtnPhotoMode"
 		btn_ph.text = "Foto"
-		btn_ph.custom_minimum_size = Vector2(48, 30)
-		btn_ph.add_theme_font_size_override("font_size", 12)
-		UIThemeHelper.apply_btn_secondary(btn_ph, 30.0)
+		btn_ph.custom_minimum_size = Vector2(42, 28)
+		btn_ph.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(btn_ph, 28.0)
 		btn_ph.pressed.connect(func():
 			if photo_helper:
 				photo_helper.enter_photo_mode()
@@ -2123,9 +2132,9 @@ func _setup_unit_and_incident_modals() -> void:
 		var btn_unit := Button.new()
 		btn_unit.name = "BtnUnit"
 		btn_unit.text = "Unit"
-		btn_unit.custom_minimum_size = Vector2(52, 30)
-		btn_unit.add_theme_font_size_override("font_size", 12)
-		UIThemeHelper.apply_btn_secondary(btn_unit, 30.0)
+		btn_unit.custom_minimum_size = Vector2(42, 28)
+		btn_unit.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(btn_unit, 28.0)
 		btn_unit.pressed.connect(_open_unit_dialog)
 		top_hbox.add_child(btn_unit)
 		top_hbox.move_child(btn_unit, btn_townhall.get_index())

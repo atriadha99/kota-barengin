@@ -838,15 +838,19 @@ func _build_ui() -> void:
 	top_bar.offset_top = 10.0
 	top_bar.offset_right = -8.0
 	top_bar.offset_bottom = 54.0
-	top_bar.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 12, 8.0, 5.0, 0.90))
+	top_bar.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(false, 12, 6.0, 4.0, 0.90))
 	hud_root.add_child(top_bar)
 
 	var top_hbox := HBoxContainer.new()
-	top_hbox.add_theme_constant_override("separation", 4)
+	top_hbox.add_theme_constant_override("separation", 3)
 	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	top_bar.add_child(top_hbox)
 
-	var chip_style := UIThemeHelper.make_chip_style()
+	var chip_style: StyleBoxFlat = UIThemeHelper.make_chip_style()
+	chip_style.content_margin_left = 6.0
+	chip_style.content_margin_right = 6.0
+	chip_style.content_margin_top = 3.0
+	chip_style.content_margin_bottom = 3.0
 
 	lbl_val_uang = _add_stat_chip(top_hbox, chip_style, "money", Color(1.0, 0.88, 0.32))
 	var kas_chip := PanelContainer.new()
@@ -884,16 +888,16 @@ func _build_ui() -> void:
 
 	var btn_s1_cam := Button.new()
 	var s1_cm: String = str(SaveManager.load_settings().get("camera_mode", "theotown"))
-	btn_s1_cam.text = "Kam: Bebas" if s1_cm == "bebas" else "Kam: TheoTown"
-	btn_s1_cam.custom_minimum_size = Vector2(88, 32)
-	UIThemeHelper.apply_btn_secondary(btn_s1_cam, 32.0)
+	btn_s1_cam.text = "Kam: Bebas" if s1_cm == "bebas" else "Kam: Theo"
+	btn_s1_cam.custom_minimum_size = Vector2(76, 30)
+	UIThemeHelper.apply_btn_secondary(btn_s1_cam, 30.0)
 	btn_s1_cam.add_theme_font_size_override("font_size", 11)
 	btn_s1_cam.pressed.connect(func():
 		var s := SaveManager.load_settings()
 		var next_m := "bebas" if str(s.get("camera_mode", "theotown")) == "theotown" else "theotown"
 		s["camera_mode"] = next_m
 		SaveManager.save_settings(s)
-		btn_s1_cam.text = "Kam: Bebas" if next_m == "bebas" else "Kam: TheoTown"
+		btn_s1_cam.text = "Kam: Bebas" if next_m == "bebas" else "Kam: Theo"
 	)
 	top_hbox.add_child(btn_s1_cam)
 
