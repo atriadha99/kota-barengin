@@ -15,6 +15,7 @@ signal map_tapped()
 signal time_weather_updated(month: int, year: int, jam: float, cuaca: String)
 signal open_farm_info_modal(tile_pos: Vector2i, tile_info: Dictionary)
 signal open_incident_modal()
+signal open_kosan_modal(tile_pos: Vector2i)
 
 enum ToolMode {
 	NONE,
@@ -44,6 +45,8 @@ enum ToolMode {
 	FLYOVER,
 	RUNWAY,
 	AIRPORT_TERMINAL,
+	KOSAN,
+	UNIVERSITAS,
 	PARK,
 	FARM,
 	BULLDOZER
@@ -488,6 +491,9 @@ func _on_tile_clicked(screen_pos: Vector2) -> void:
 	if clicked_type == CityData.TileType.TOWNHALL or (clicked_type == CityData.TileType.MAYOR_OFFICE and current_tool != ToolMode.BULLDOZER):
 		open_townhall_modal.emit()
 		return
+	if clicked_type == CityData.TileType.KOSAN and current_tool != ToolMode.BULLDOZER:
+		open_kosan_modal.emit(tile_coords)
+		return
 
 	# 4. Cek apakah klik mengenai insiden aktif atau bangunan rusak akibat kebakaran
 	if current_tool != ToolMode.BULLDOZER and not city_data.insiden_aktif.is_empty():
@@ -564,6 +570,11 @@ func _apply_tool(x: int, y: int) -> void:
 				city_data.wide_roads.erase(pos)
 			elif cur_type == CityData.TileType.FLYOVER:
 				city_data.flyovers.erase(Vector2i(x, y))
+			elif cur_type == CityData.TileType.KOSAN:
+				city_data.kosan_data.erase("%d,%d" % [x, y])
+			elif cur_type == CityData.TileType.UNIVERSITAS:
+				city_data.education = clampf(city_data.education - 10.0, 0.0, 100.0)
+				show_toast.emit("Universitas dibongkar! Pendidikan -10, mahasiswa berhenti datang.")
 
 			if not city_data.active_fire.is_empty() and city_data.active_fire.get("pos", Vector2i(-1, -1)) == Vector2i(x, y):
 				city_data.active_fire.clear()
@@ -709,6 +720,12 @@ func _apply_tool(x: int, y: int) -> void:
 		ToolMode.FIRE_STATION:
 			cost = CityData.COST_FIRE_STATION
 			target_type = CityData.TileType.FIRE_STATION
+		ToolMode.KOSAN:
+			cost = CityData.COST_KOSAN
+			target_type = CityData.TileType.KOSAN
+		ToolMode.UNIVERSITAS:
+			cost = CityData.COST_UNIVERSITAS
+			target_type = CityData.TileType.UNIVERSITAS
 		ToolMode.ZONE_MILITARY:
 			cost = CityData.COST_ZONE_MILITARY
 			target_type = CityData.TileType.ZONE_MILITARY
@@ -786,6 +803,10 @@ func _apply_tool(x: int, y: int) -> void:
 			tnode2.queue_free()
 		forest_trees.erase(f_key2)
 	city_data.set_tile(x, y, target_type, target_level, target_zone, preview_rotation)
+	if target_type == CityData.TileType.KOSAN:
+		city_data.kosan_data["%d,%d" % [x, y]] = {"rent": 50000, "occupied": 0, "rent_changed_month": -1}
+	elif target_type == CityData.TileType.UNIVERSITAS:
+		city_data.education = clampf(city_data.education + 10.0, 0.0, 100.0)
 	if target_type in [CityData.TileType.ROAD, CityData.TileType.STOP_ANGKOT, CityData.TileType.STOP_BUS]:
 		var pos := Vector2i(x, y)
 		city_data.power_cables[pos] = true
@@ -1037,6 +1058,9 @@ func _advance_month() -> void:
 
 	# 7. Efek Bulanan Gedung Layanan Publik & Event Kebakaran
 	_apply_public_buildings_monthly()
+	_process_bank_loan_monthly()
+	_process_kosan_monthly()
+	_process_universitas_and_education_monthly()
 	_process_fire_event_monthly()
 	_process_incidents_monthly()
 	_process_city_events_monthly()
@@ -1248,6 +1272,187 @@ func _apply_public_buildings_monthly() -> void:
 		if comp.get("type", "") == ComplaintsData.COMPLAINT_PUNGLI and int(comp.get("wait_months", 0)) >= 3 and not comp.get("pungli_warned", false):
 			comp["pungli_warned"] = true
 			city_data.popularity = clampf(city_data.popularity - 10.0, 0.0, 100.0)
+
+func take_bank_loan(amount: int, months: int) -> bool:
+	if not city_data.pinjaman_bank.is_empty():
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Masih ada pinjaman aktif! Lunasi dulu sebelum pinjam lagi.")
+		return false
+	var limit: int = city_data.get_bank_loan_limit()
+	if amount > limit or amount <= 0:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Limit pinjaman Rp %s — naikkan Popularitas / Populasi dulu" % _format_number(limit))
+		return false
+	var m_count: int = months if months in [6, 12, 24] else 12
+	var monthly_p: int = int(amount / m_count)
+	var first_i: int = int(float(amount) * 0.05)
+	var due_m: int = ((city_data.month - 1 + m_count) % 12) + 1
+	var due_y: int = city_data.year + int((city_data.month - 1 + m_count) / 12)
+	city_data.pinjaman_bank = {
+		"principal": amount,
+		"remaining": amount,
+		"months_total": m_count,
+		"months_left": m_count,
+		"paid_total": 0,
+		"overdue_months": 0,
+		"frozen": false,
+		"due_month": due_m,
+		"due_year": due_y
+	}
+	city_data.money += amount
+	AudioManager.play_sfx(self, "build")
+	show_toast.emit("Pinjaman Rp %s cair — cicilan Rp %s/bulan selama %d bulan" % [_format_number(amount), _format_number(monthly_p + first_i), m_count])
+	city_updated.emit(city_data)
+	return true
+
+func payoff_bank_loan() -> bool:
+	if city_data.pinjaman_bank.is_empty():
+		return false
+	var rem: int = int(city_data.pinjaman_bank.get("remaining", 0))
+	if city_data.money < rem:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Uang kota tidak cukup untuk melunasi!")
+		return false
+	city_data.money -= rem
+	city_data.pinjaman_bank.clear()
+	AudioManager.play_sfx(self, "build")
+	show_toast.emit("Pinjaman lunas! Limit pinjaman kembali penuh")
+	city_updated.emit(city_data)
+	return true
+
+func adjust_kosan_rent(pos: Vector2i, delta_rent: int) -> void:
+	var key: String = "%d,%d" % [pos.x, pos.y]
+	if not city_data.kosan_data.has(key):
+		return
+	var kd: Dictionary = city_data.kosan_data[key]
+	var cur_total_m: int = city_data.year * 12 + city_data.month
+	if int(kd.get("rent_changed_month", -1)) == cur_total_m:
+		AudioManager.play_sfx(self, "error")
+		show_toast.emit("Sewa Kosan hanya bisa diubah 1x per bulan!")
+		return
+	var old_rent: int = int(kd.get("rent", 50000))
+	var new_rent: int = clampi(old_rent + delta_rent, 20000, 100000)
+	if new_rent == old_rent:
+		return
+	kd["rent"] = new_rent
+	kd["rent_changed_month"] = cur_total_m
+	if delta_rent > 0:
+		kd["occupied"] = maxi(0, int(kd.get("occupied", 0)) - 1)
+		city_data.happiness = clampf(city_data.happiness - 1.0, 0.0, 100.0)
+	else:
+		kd["occupied"] = mini(10, int(kd.get("occupied", 0)) + 1)
+	AudioManager.play_sfx(self, "click")
+	show_toast.emit("Sewa Kosan diubah menjadi Rp %s/kamar" % _format_number(new_rent))
+	city_updated.emit(city_data)
+
+func _process_bank_loan_monthly() -> void:
+	if city_data.pinjaman_bank.is_empty():
+		return
+	var rem: int = int(city_data.pinjaman_bank.get("remaining", 0))
+	var m_left: int = maxi(1, int(city_data.pinjaman_bank.get("months_left", 1)))
+	var overdue: int = int(city_data.pinjaman_bank.get("overdue_months", 0))
+	var p_part: int = int(rem / m_left)
+	var interest: int = int(float(rem) * 0.05)
+	var due_now: int = p_part + interest
+	var pay_months: int = 1 + mini(overdue, 2)
+	var total_due: int = mini(rem + interest * pay_months, p_part * pay_months + interest)
+
+	if city_data.money >= total_due:
+		city_data.money -= total_due
+		var principal_paid: int = mini(rem, p_part * pay_months)
+		rem -= principal_paid
+		m_left = maxi(0, m_left - 1)
+		city_data.pinjaman_bank["remaining"] = rem
+		city_data.pinjaman_bank["months_left"] = m_left
+		city_data.pinjaman_bank["paid_total"] = int(city_data.pinjaman_bank.get("paid_total", 0)) + total_due
+		city_data.pinjaman_bank["overdue_months"] = 0
+		if rem <= 0 or m_left <= 0:
+			city_data.pinjaman_bank.clear()
+			show_toast.emit("Pinjaman lunas! Limit pinjaman kembali penuh")
+	else:
+		overdue += 1
+		city_data.pinjaman_bank["overdue_months"] = overdue
+		city_data.popularity = clampf(city_data.popularity - 2.0, 0.0, 100.0)
+		if overdue >= 3 and not bool(city_data.pinjaman_bank.get("frozen", false)):
+			city_data.pinjaman_bank["frozen"] = true
+			city_data.popularity = clampf(city_data.popularity - 5.0, 0.0, 100.0)
+			show_toast.emit("Tunggakan 3 bulan! Pinjaman baru dibekukan sampai utang lunas.")
+		else:
+			show_toast.emit("Cicilan Bank Rp %s tertunggak! (Popularitas -2)" % _format_number(due_now))
+
+func _process_kosan_monthly() -> void:
+	var kosan_positions: Array[Vector2i] = city_data.get_working_public_positions(CityData.TileType.KOSAN)
+	var uni_positions: Array[Vector2i] = city_data.get_working_public_positions(CityData.TileType.UNIVERSITAS)
+	var school_positions: Array[Vector2i] = city_data.get_working_public_positions(CityData.TileType.SCHOOL)
+	for kp in kosan_positions:
+		var key: String = "%d,%d" % [kp.x, kp.y]
+		if not city_data.kosan_data.has(key):
+			city_data.kosan_data[key] = {"rent": 50000, "occupied": 0, "rent_changed_month": -1}
+		var kd: Dictionary = city_data.kosan_data[key]
+		var target: int = 2
+		for up in uni_positions:
+			if kp.distance_to(up) <= 15.0:
+				target += 3
+				break
+		for sp in school_positions:
+			if kp.distance_to(sp) <= 10.0:
+				target += 1
+				break
+		for y in range(CityData.GRID_SIZE):
+			for x in range(CityData.GRID_SIZE):
+				var t: Dictionary = city_data.get_tile(x, y)
+				var tp: int = int(t.get("type", CityData.TileType.EMPTY))
+				if int(t.get("level", 0)) > 0 and tp in [CityData.TileType.ZONE_I, CityData.TileType.ZONE_C] and kp.distance_to(Vector2i(x, y)) <= 10.0:
+					target += 2
+					break
+			if target >= 8:
+				break
+		if city_data.security < 40.0:
+			target -= 3
+		if city_data.happiness < 40.0:
+			target -= 2
+		target = clampi(target, 0, 10)
+		var cur_occ: int = int(kd.get("occupied", 0))
+		var step: int = clampi(target - cur_occ, -2, 2)
+		cur_occ = clampi(cur_occ + step, 0, 10)
+		kd["occupied"] = cur_occ
+		var rent: int = int(kd.get("rent", 50000))
+		var income: int = cur_occ * rent
+		city_data.money += income
+		if city_data.money >= 20000:
+			city_data.money -= 20000
+
+func _process_universitas_and_education_monthly() -> void:
+	var has_school: bool = city_data.has_working_public(CityData.TileType.SCHOOL)
+	var has_uni: bool = city_data.has_working_public(CityData.TileType.UNIVERSITAS)
+	var has_clinic: bool = city_data.has_working_public(CityData.TileType.CLINIC)
+	if not has_school:
+		city_data.education = clampf(city_data.education - 2.0, 0.0, 100.0)
+	else:
+		var edu_gain: float = 1.0 + (0.5 if has_clinic else 0.0) + (1.5 if has_uni else 0.0)
+		city_data.education = clampf(city_data.education + edu_gain, 0.0, 100.0)
+
+	if city_data.education >= 70.0:
+		city_data.popularity = clampf(city_data.popularity + 2.0, 0.0, 100.0)
+
+	if has_uni:
+		city_data.popularity = clampf(city_data.popularity + 5.0, 0.0, 100.0)
+		city_data.security = clampf(city_data.security + 2.0, 0.0, 100.0)
+		var unis: Array[Vector2i] = city_data.get_working_public_positions(CityData.TileType.UNIVERSITAS)
+		var kosans: Array[Vector2i] = city_data.get_working_public_positions(CityData.TileType.KOSAN)
+		var has_empty_near: bool = false
+		for up in unis:
+			for kp in kosans:
+				if up.distance_to(kp) <= 15.0:
+					var kd: Dictionary = city_data.kosan_data.get("%d,%d" % [kp.x, kp.y], {})
+					if int(kd.get("occupied", 0)) < 10:
+						has_empty_near = true
+						break
+		if has_empty_near:
+			city_data.population += 5
+		else:
+			city_data.population += 2
+			show_toast.emit("Kosan di dekat kampus penuh semua nih...")
 			show_toast.emit("Ada laporan pungli yang tidak ditangani — Popularitas -10")
 
 func _process_fire_event_monthly() -> void:
@@ -1747,7 +1952,9 @@ func get_missions_status() -> Array:
 		{ "id": "util_1", "title": "1 Pembangkit + 1 Menara Air", "reward": 50000, "done": has_power_and_water },
 		{ "id": "wheat_1", "title": "Panen gandum pertama", "reward": 25000, "done": city_data.wheat_harvest_count >= 1 },
 		{ "id": "tier_kc", "title": "Capai level Kota Kecil", "reward": 150000, "done": is_kota_kecil },
-		{ "id": "airport_1", "title": "Bangun Bandara pertama", "reward": 150000, "done": city_data.has_working_airport() }
+		{ "id": "airport_1", "title": "Bangun Bandara pertama", "reward": 150000, "done": city_data.has_working_airport() },
+		{ "id": "kosan_first", "title": "Juragan Kosan Pertama (5 kamar)", "reward": 75000, "done": city_data.count_public_type(CityData.TileType.KOSAN) >= 1 and city_data.get_total_kosan_occupied() >= 5 },
+		{ "id": "kosan_success", "title": "Juragan Kosan Sukses (30 kamar)", "reward": 150000, "done": city_data.get_total_kosan_occupied() >= 30 }
 	]
 
 	var result: Array = []

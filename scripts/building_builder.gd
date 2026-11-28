@@ -88,6 +88,10 @@ static func create_tile_node(type: CityData.TileType, level: int = 0, zone: City
 			root.add_child(_create_runway_mesh())
 		CityData.TileType.AIRPORT_TERMINAL:
 			root.add_child(_create_airport_terminal_mesh())
+		CityData.TileType.KOSAN:
+			root.add_child(_create_kosan_mesh())
+		CityData.TileType.UNIVERSITAS:
+			root.add_child(_create_universitas_mesh())
 
 	# Indikator jika bangunan tidak mendapat suplai utilitas (listrik / air)
 	var needs_util_badge: bool = (type == CityData.TileType.BUILDING or (level > 0 and type in [CityData.TileType.ZONE_R, CityData.TileType.ZONE_C, CityData.TileType.ZONE_I, CityData.TileType.ZONE_MILITARY]) or (type in CityData.PUBLIC_BUILDING_TYPES) or (type in [CityData.TileType.TRAIN_STATION, CityData.TileType.STOP_BUSWAY, CityData.TileType.AIRPORT_TERMINAL]))
@@ -1130,3 +1134,44 @@ static func create_bubble_chat(text: String, is_pak_slamet: bool = false) -> Nod
 
 	root.add_child(label)
 	return root
+
+static func _create_kosan_mesh() -> Node3D:
+	var node := Node3D.new()
+	# Bangunan Kosan 2 lantai + parkiran motor di depan + papan KOSAN
+	_add_box(node, Vector3(2.8, 0.08, 2.8), Vector3(0.0, 0.04, 0.0), Color(0.55, 0.56, 0.58))
+	_add_box(node, Vector3(2.3, 1.55, 1.7), Vector3(0.0, 0.85, -0.35), Color(0.92, 0.86, 0.72))
+	_add_prism_roof(node, Vector3(2.45, 0.55, 1.85), Vector3(0.0, 1.90, -0.35), Color(0.72, 0.30, 0.22))
+	for fl in [0.55, 1.25]:
+		for wx in [-0.75, -0.25, 0.25, 0.75]:
+			_add_box(node, Vector3(0.26, 0.28, 0.05), Vector3(wx, fl, 0.51), Color(0.14, 0.22, 0.32))
+	# Parkiran motor kecil di depan
+	_add_box(node, Vector3(1.8, 0.04, 0.7), Vector3(0.0, 0.09, 0.95), Color(0.32, 0.34, 0.38))
+	var lbl := Label3D.new()
+	lbl.text = "KOSAN"
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 24
+	lbl.modulate = Color(1.0, 0.90, 0.35)
+	lbl.position = Vector3(0.0, 2.55, 0.0)
+	node.add_child(lbl)
+	return node
+
+static func _create_universitas_mesh() -> Node3D:
+	var node := Node3D.new()
+	# Gedung Universitas 3x3 + lapangan/pohon depan + gerbang + papan UNIVERSITAS
+	_add_box(node, Vector3(4.6, 0.10, 4.6), Vector3(0.0, 0.05, 0.0), Color(0.62, 0.64, 0.66))
+	_add_box(node, Vector3(3.6, 1.85, 2.2), Vector3(0.0, 1.0, -0.8), Color(0.94, 0.92, 0.86))
+	_add_prism_roof(node, Vector3(3.8, 0.75, 2.4), Vector3(0.0, 2.30, -0.8), Color(0.22, 0.42, 0.72))
+	_add_box(node, Vector3(1.2, 0.65, 1.2), Vector3(0.0, 2.35, -0.8), Color(0.85, 0.68, 0.22))
+	# Lapangan + gerbang depan
+	_add_box(node, Vector3(2.8, 0.04, 1.5), Vector3(0.0, 0.11, 1.1), Color(0.26, 0.56, 0.26))
+	_add_box(node, Vector3(0.22, 0.9, 0.22), Vector3(-0.7, 0.50, 2.0), Color(0.75, 0.32, 0.22))
+	_add_box(node, Vector3(0.22, 0.9, 0.22), Vector3(0.7, 0.50, 2.0), Color(0.75, 0.32, 0.22))
+	_add_box(node, Vector3(1.7, 0.18, 0.18), Vector3(0.0, 1.0, 2.0), Color(0.22, 0.42, 0.72))
+	var lbl := Label3D.new()
+	lbl.text = "UNIVERSITAS"
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.font_size = 28
+	lbl.modulate = Color(1.0, 0.92, 0.38)
+	lbl.position = Vector3(0.0, 3.25, 0.0)
+	node.add_child(lbl)
+	return node

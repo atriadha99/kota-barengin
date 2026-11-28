@@ -135,6 +135,10 @@ static func save_season2(data: CityData) -> bool:
 	cfg.set_value("tiles", "water_pipes", data.water_pipes.keys())
 	cfg.set_value("city", "security", data.security)
 	cfg.set_value("city", "health", data.health)
+	cfg.set_value("city", "pendidikan", data.education)
+	cfg.set_value("city", "pinjaman_bank", data.pinjaman_bank.duplicate(true))
+	cfg.set_value("city", "kosan", data.kosan_data.duplicate(true))
+	cfg.set_value("city", "universitas", data.count_public_type(CityData.TileType.UNIVERSITAS) > 0)
 	cfg.set_value("city", "fire_cooldown_months", data.fire_cooldown_months)
 	cfg.set_value("city", "active_fire", data.active_fire.duplicate(true))
 	cfg.set_value("city", "insiden_aktif", data.insiden_aktif.duplicate(true))
@@ -203,6 +207,11 @@ static func load_season2(data: CityData) -> bool:
 	data.integrity = float(cfg.get_value("city", "integrity", 80.0))
 	data.security = float(cfg.get_value("city", "security", 50.0))
 	data.health = float(cfg.get_value("city", "health", 70.0))
+	data.education = float(cfg.get_value("city", "pendidikan", 20.0))
+	var pb = cfg.get_value("city", "pinjaman_bank", {})
+	data.pinjaman_bank = pb.duplicate(true) if pb is Dictionary else {}
+	var kd = cfg.get_value("city", "kosan", {})
+	data.kosan_data = kd.duplicate(true) if kd is Dictionary else {}
 	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
 	var af = cfg.get_value("city", "active_fire", {})
 	data.active_fire = af.duplicate(true) if af is Dictionary else {}
@@ -308,6 +317,11 @@ static func load_season2(data: CityData) -> bool:
 
 	data.security = float(cfg.get_value("city", "security", 50.0))
 	data.health = float(cfg.get_value("city", "health", 70.0))
+	data.education = float(cfg.get_value("city", "pendidikan", 20.0))
+	var pb = cfg.get_value("city", "pinjaman_bank", {})
+	data.pinjaman_bank = pb.duplicate(true) if pb is Dictionary else {}
+	var kd = cfg.get_value("city", "kosan", {})
+	data.kosan_data = kd.duplicate(true) if kd is Dictionary else {}
 	data.fire_cooldown_months = int(cfg.get_value("city", "fire_cooldown_months", 0))
 	var af2 = cfg.get_value("city", "active_fire", {})
 	data.active_fire = af2.duplicate(true) if af2 is Dictionary else {}

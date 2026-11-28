@@ -123,6 +123,13 @@ var unit_modal: PanelContainer = null
 var unit_vbox: VBoxContainer = null
 var incident_modal: PanelContainer = null
 var incident_vbox: VBoxContainer = null
+var label_education: Label = null
+var bank_modal: PanelContainer = null
+var bank_vbox: VBoxContainer = null
+var _bank_term_months: int = 12
+var kosan_modal: PanelContainer = null
+var kosan_vbox: VBoxContainer = null
+var _selected_kosan_pos: Vector2i = Vector2i(-1, -1)
 var _pending_region: Vector2i = Vector2i.ZERO
 
 func _ready() -> void:
@@ -139,6 +146,7 @@ func _ready() -> void:
 		city_manager.time_weather_updated.connect(_on_time_weather_updated)
 		city_manager.open_farm_info_modal.connect(_open_farm_info_dialog)
 		city_manager.open_incident_modal.connect(_open_incident_dialog)
+		city_manager.open_kosan_modal.connect(_open_kosan_dialog)
 
 	tool_buttons = {
 		CityManager.ToolMode.ROAD: btn_road,
@@ -294,6 +302,7 @@ func _ready() -> void:
 	_setup_pause_and_settings()
 	_setup_region_buy_modal()
 	_setup_unit_and_incident_modals()
+	_setup_bank_and_kosan_modals()
 	_setup_touch_controls()
 	_polish_hud_topbar()
 	_select_tool(CityManager.ToolMode.ROAD)
@@ -371,6 +380,15 @@ func _on_city_updated(data: CityData) -> void:
 			label_security.modulate = Color(0.95, 0.85, 0.30)
 		else:
 			label_security.modulate = Color(1.0, 0.35, 0.35)
+
+	if label_education:
+		label_education.text = "Pend: %d%%" % int(round(data.education))
+		if data.education >= 70.0:
+			label_education.modulate = Color(0.35, 0.90, 0.50)
+		elif data.education >= 30.0:
+			label_education.modulate = Color(0.95, 0.85, 0.30)
+		else:
+			label_education.modulate = Color(1.0, 0.45, 0.35)
 
 	label_power.text = "%d/%d" % [data.power_used, data.power_supply]
 	if data.power_used > data.power_supply:
@@ -558,10 +576,12 @@ func _refresh_townhall_list() -> void:
 			break
 		top_wishes += (", " if shown_w > 0 else "") + wt
 		shown_w += 1
-	th_stats_label.text = "Popularitas: %d%%  |  Kebahagiaan: %d%%  |  Kas: Rp %s\nKeinginan Warga: %d terpenuhi / %d total (%s)" % [
+	var juragan_txt: String = "  |  Gelar: Juragan Kosan" if data.get_total_kosan_occupied() >= 20 else ""
+	th_stats_label.text = "Popularitas: %d%%  |  Kebahagiaan: %d%%  |  Kas: Rp %s%s\nKeinginan Warga: %d terpenuhi / %d total (%s)" % [
 		int(round(data.popularity)),
 		int(round(data.happiness)),
 		_format_number(data.money),
+		juragan_txt,
 		w_done,
 		w_total,
 		top_wishes if not top_wishes.is_empty() else "-"
@@ -806,6 +826,23 @@ func _polish_hud_topbar() -> void:
 		if pop_chip and pop_chip.get_parent() == top_hbox:
 			top_hbox.move_child(sec_chip, pop_chip.get_index() + 1)
 
+	if not label_education:
+		label_education = Label.new()
+		label_education.name = "LabelEducation"
+		label_education.text = "Pend: 20%"
+		label_education.add_theme_font_size_override("font_size", 12)
+		var edu_chip := PanelContainer.new()
+		edu_chip.add_theme_stylebox_override("panel", chip_style)
+		var ech := HBoxContainer.new()
+		ech.add_theme_constant_override("separation", 3)
+		ech.add_child(S1VisualBuilder.StatIcon.new("date"))
+		ech.add_child(label_education)
+		edu_chip.add_child(ech)
+		top_hbox.add_child(edu_chip)
+		var sec_c: Node = label_security.get_parent().get_parent() if label_security else null
+		if sec_c and sec_c.get_parent() == top_hbox:
+			top_hbox.move_child(edu_chip, sec_c.get_index() + 1)
+
 func _setup_utility_buttons() -> void:
 	var palette := get_node_or_null("BottomPalette") as PanelContainer
 	var hbox := get_node_or_null("BottomPalette/HBox") as HBoxContainer
@@ -840,6 +877,8 @@ func _setup_utility_buttons() -> void:
 		{"name": "BtnMilitary", "label": "Markas TNI", "price_txt": "Rp200rb", "mode": CityManager.ToolMode.MILITARY, "tile_type": CityData.TileType.MILITARY, "cost": CityData.COST_MILITARY, "cat": "publik"},
 		{"name": "BtnMayorOffice", "label": "Ktr Walikota", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.MAYOR_OFFICE, "tile_type": CityData.TileType.MAYOR_OFFICE, "cost": CityData.COST_MAYOR_OFFICE, "cat": "publik"},
 		{"name": "BtnFireStation", "label": "Damkar", "price_txt": "Rp120rb", "mode": CityManager.ToolMode.FIRE_STATION, "tile_type": CityData.TileType.FIRE_STATION, "cost": CityData.COST_FIRE_STATION, "cat": "publik"},
+		{"name": "BtnKosan", "label": "Kosan", "price_txt": "Rp100rb", "mode": CityManager.ToolMode.KOSAN, "tile_type": CityData.TileType.KOSAN, "cost": CityData.COST_KOSAN, "cat": "publik"},
+		{"name": "BtnUniversitas", "label": "Universitas", "price_txt": "Rp500rb", "mode": CityManager.ToolMode.UNIVERSITAS, "tile_type": CityData.TileType.UNIVERSITAS, "cost": CityData.COST_UNIVERSITAS, "cat": "publik"},
 		{"name": "BtnZoneMilitary", "label": "Z. Militer", "price_txt": "Rp2rb", "mode": CityManager.ToolMode.ZONE_MILITARY, "tile_type": CityData.TileType.ZONE_MILITARY, "cost": CityData.COST_ZONE_MILITARY, "cat": "zona"},
 		{"name": "BtnTrainStation", "label": "Stasiun", "price_txt": "Rp150rb", "mode": CityManager.ToolMode.TRAIN_STATION, "tile_type": CityData.TileType.TRAIN_STATION, "cost": CityData.COST_TRAIN_STATION, "cat": "transport"},
 		{"name": "BtnRail", "label": "Rel Kereta", "price_txt": "Rp3rb", "mode": CityManager.ToolMode.RAIL, "tile_type": CityData.TileType.RAIL, "cost": CityData.COST_RAIL, "cat": "transport"},
@@ -2328,3 +2367,249 @@ func _add_unit_dispatch_btn(label_txt: String, kind: String, cost: int) -> void:
 			_refresh_incident_modal()
 		)
 	incident_vbox.add_child(btn)
+
+func _setup_bank_and_kosan_modals() -> void:
+	var top_hbox: HBoxContainer = get_node_or_null("TopPanel/HBox") as HBoxContainer
+	if top_hbox and btn_townhall:
+		var btn_bank := Button.new()
+		btn_bank.name = "BtnBank"
+		btn_bank.text = "Bank"
+		btn_bank.custom_minimum_size = Vector2(44, 28)
+		btn_bank.add_theme_font_size_override("font_size", 11)
+		UIThemeHelper.apply_btn_secondary(btn_bank, 28.0)
+		btn_bank.pressed.connect(_open_bank_dialog)
+		top_hbox.add_child(btn_bank)
+		top_hbox.move_child(btn_bank, btn_townhall.get_index())
+
+	bank_modal = PanelContainer.new()
+	bank_modal.name = "BankModal"
+	bank_modal.visible = false
+	bank_modal.set_anchors_preset(Control.PRESET_CENTER)
+	bank_modal.offset_left = -240.0
+	bank_modal.offset_top = -195.0
+	bank_modal.offset_right = 240.0
+	bank_modal.offset_bottom = 195.0
+	bank_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 18, 18.0, 14.0, 0.96))
+	add_child(bank_modal)
+
+	var b_wrap := VBoxContainer.new()
+	b_wrap.add_theme_constant_override("separation", 8)
+	bank_modal.add_child(b_wrap)
+	b_wrap.add_child(UIThemeHelper.make_panel_header("Bank Kota", "money"))
+	b_wrap.add_child(HSeparator.new())
+	var b_scroll := ScrollContainer.new()
+	b_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	b_wrap.add_child(b_scroll)
+	bank_vbox = VBoxContainer.new()
+	bank_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bank_vbox.add_theme_constant_override("separation", 6)
+	b_scroll.add_child(bank_vbox)
+	var btn_b_close := Button.new()
+	btn_b_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_b_close, 40.0)
+	btn_b_close.pressed.connect(func(): bank_modal.visible = false)
+	b_wrap.add_child(btn_b_close)
+
+	kosan_modal = PanelContainer.new()
+	kosan_modal.name = "KosanModal"
+	kosan_modal.visible = false
+	kosan_modal.set_anchors_preset(Control.PRESET_CENTER)
+	kosan_modal.offset_left = -225.0
+	kosan_modal.offset_top = -185.0
+	kosan_modal.offset_right = 225.0
+	kosan_modal.offset_bottom = 185.0
+	kosan_modal.add_theme_stylebox_override("panel", UIThemeHelper.make_panel_style(true, 18, 18.0, 14.0, 0.96))
+	add_child(kosan_modal)
+
+	var k_wrap := VBoxContainer.new()
+	k_wrap.add_theme_constant_override("separation", 8)
+	kosan_modal.add_child(k_wrap)
+	k_wrap.add_child(UIThemeHelper.make_panel_header("Juragan Kosan", "pop"))
+	k_wrap.add_child(HSeparator.new())
+	kosan_vbox = VBoxContainer.new()
+	kosan_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	kosan_vbox.add_theme_constant_override("separation", 6)
+	k_wrap.add_child(kosan_vbox)
+	var btn_k_close := Button.new()
+	btn_k_close.text = "Tutup"
+	UIThemeHelper.apply_btn_secondary(btn_k_close, 38.0)
+	btn_k_close.pressed.connect(func(): kosan_modal.visible = false)
+	k_wrap.add_child(btn_k_close)
+
+func _open_bank_dialog() -> void:
+	if not bank_modal:
+		return
+	bank_modal.visible = true
+	_refresh_bank_modal()
+
+func _refresh_bank_modal() -> void:
+	if not bank_vbox or not city_manager or not city_manager.city_data:
+		return
+	for ch in bank_vbox.get_children():
+		ch.queue_free()
+	var data: CityData = city_manager.city_data
+	var limit: int = data.get_bank_loan_limit()
+	var has_loan: bool = not data.pinjaman_bank.is_empty()
+	var rem: int = int(data.pinjaman_bank.get("remaining", 0)) if has_loan else 0
+
+	var lim_lbl := Label.new()
+	lim_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lim_lbl.add_theme_font_size_override("font_size", 13)
+	lim_lbl.text = "Limit Pinjaman: Rp %s\nSisa Limit: Rp %s" % [_format_number(limit), _format_number(maxi(0, limit - rem))]
+	bank_vbox.add_child(lim_lbl)
+
+	if has_loan:
+		var m_left: int = maxi(1, int(data.pinjaman_bank.get("months_left", 1)))
+		var p_part: int = int(rem / m_left)
+		var interest: int = int(float(rem) * 0.05)
+		var paid_t: int = int(data.pinjaman_bank.get("paid_total", 0))
+		var due_m: int = int(data.pinjaman_bank.get("due_month", 1))
+		var due_y: int = int(data.pinjaman_bank.get("due_year", 1))
+		var overdue: int = int(data.pinjaman_bank.get("overdue_months", 0))
+
+		var st_lbl := Label.new()
+		st_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		st_lbl.add_theme_font_size_override("font_size", 12)
+		st_lbl.text = "Sisa Utang: Rp %s (%d bln tersisa)\nCicilan Bulan Ini: Pokok Rp %s + Bunga Rp %s\nTotal Dibayar: Rp %s | Perkiraan Lunas: Bln %d Th %d" % [
+			_format_number(rem), m_left, _format_number(p_part), _format_number(interest), _format_number(paid_t), due_m, due_y
+		]
+		bank_vbox.add_child(st_lbl)
+
+		if overdue > 0:
+			var warn := Label.new()
+			warn.text = "Cicilan tertunggak — bayar secepatnya!"
+			warn.add_theme_color_override("font_color", Color(1.0, 0.35, 0.35))
+			warn.add_theme_font_size_override("font_size", 12)
+			bank_vbox.add_child(warn)
+
+		var btn_pay := Button.new()
+		btn_pay.text = "Lunasi Sekarang (Rp %s)" % _format_number(rem)
+		if data.money < rem:
+			btn_pay.disabled = true
+			UIThemeHelper.apply_btn_secondary(btn_pay, 42.0)
+		else:
+			UIThemeHelper.apply_btn_primary(btn_pay, 42.0)
+			btn_pay.pressed.connect(func():
+				if city_manager.payoff_bank_loan():
+					_refresh_bank_modal()
+			)
+		bank_vbox.add_child(btn_pay)
+		return
+
+	var term_hb := HBoxContainer.new()
+	term_hb.add_theme_constant_override("separation", 6)
+	bank_vbox.add_child(term_hb)
+	for tm in [6, 12, 24]:
+		var tb := Button.new()
+		tb.text = "%d Bulan" % tm
+		tb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if _bank_term_months == tm:
+			UIThemeHelper.apply_btn_primary(tb, 34.0)
+		else:
+			UIThemeHelper.apply_btn_secondary(tb, 34.0)
+		var term_v: int = tm
+		tb.pressed.connect(func():
+			_bank_term_months = term_v
+			_refresh_bank_modal()
+		)
+		term_hb.add_child(tb)
+
+	for amt in [100000, 250000, 500000, 1000000]:
+		var b_loan := Button.new()
+		var amt_v: int = amt
+		if amt_v > limit:
+			b_loan.text = "Limit pinjaman Rp %s — naikkan Popularitas / Populasi dulu" % _format_number(limit)
+			b_loan.disabled = true
+			UIThemeHelper.apply_btn_secondary(b_loan, 40.0)
+		else:
+			b_loan.text = "Pinjam Rp %s (%d bln)" % [_format_number(amt_v), _bank_term_months]
+			UIThemeHelper.apply_btn_primary(b_loan, 40.0)
+			b_loan.pressed.connect(func():
+				if city_manager.take_bank_loan(amt_v, _bank_term_months):
+					_refresh_bank_modal()
+			)
+		bank_vbox.add_child(b_loan)
+
+func _open_kosan_dialog(pos: Vector2i) -> void:
+	if not kosan_modal or not kosan_vbox or not city_manager or not city_manager.city_data:
+		return
+	_selected_kosan_pos = pos
+	_refresh_kosan_modal()
+	kosan_modal.visible = true
+
+func _refresh_kosan_modal() -> void:
+	if not kosan_vbox or not city_manager or not city_manager.city_data:
+		return
+	for ch in kosan_vbox.get_children():
+		ch.queue_free()
+	var data: CityData = city_manager.city_data
+	var kd: Dictionary = data.kosan_data.get("%d,%d" % [_selected_kosan_pos.x, _selected_kosan_pos.y], {"rent": 50000, "occupied": 0})
+	var occ: int = int(kd.get("occupied", 0))
+	var rent: int = int(kd.get("rent", 50000))
+	var gross: int = occ * rent
+	var maint: int = 20000
+	var net: int = gross - maint
+
+	var info := Label.new()
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_theme_font_size_override("font_size", 13)
+	info.text = "Kosan — %d/10 kamar terisi\nSewa masuk: Rp %s/bulan\nPerawatan: Rp 20.000/bulan\nBersih: Rp %s/bulan" % [
+		occ, _format_number(gross), _format_number(net)
+	]
+	kosan_vbox.add_child(info)
+
+	if occ > 0 and not data.citizens_data.is_empty():
+		var res_txt: String = "Penghuni:"
+		for i in range(mini(occ, mini(4, data.citizens_data.size()))):
+			var c: Dictionary = data.citizens_data[i]
+			res_txt += "\n• %s (%s)" % [str(c.get("name", "Warga")), str(c.get("occupation", "Mahasiswa"))]
+		var res_lbl := Label.new()
+		res_lbl.text = res_txt
+		res_lbl.add_theme_font_size_override("font_size", 11)
+		kosan_vbox.add_child(res_lbl)
+
+	var rhb := HBoxContainer.new()
+	rhb.add_theme_constant_override("separation", 6)
+	kosan_vbox.add_child(rhb)
+
+	var btn_up := Button.new()
+	btn_up.text = "Naikkan Sewa +Rp10.000"
+	btn_up.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_secondary(btn_up, 38.0)
+	btn_up.disabled = (rent >= 100000)
+	btn_up.pressed.connect(func():
+		city_manager.adjust_kosan_rent(_selected_kosan_pos, 10000)
+		_refresh_kosan_modal()
+	)
+	rhb.add_child(btn_up)
+
+	var btn_dn := Button.new()
+	btn_dn.text = "Turunkan Sewa -Rp10.000"
+	btn_dn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_secondary(btn_dn, 38.0)
+	btn_dn.disabled = (rent <= 20000)
+	btn_dn.pressed.connect(func():
+		city_manager.adjust_kosan_rent(_selected_kosan_pos, -10000)
+		_refresh_kosan_modal()
+	)
+	rhb.add_child(btn_dn)
+
+	var act_hb := HBoxContainer.new()
+	act_hb.add_theme_constant_override("separation", 6)
+	kosan_vbox.add_child(act_hb)
+	var btn_rot := Button.new()
+	btn_rot.text = "Putar"
+	btn_rot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_secondary(btn_rot, 36.0)
+	btn_rot.pressed.connect(func(): city_manager.rotate_building_at(_selected_kosan_pos))
+	act_hb.add_child(btn_rot)
+
+	var btn_mov := Button.new()
+	btn_mov.text = "Pindah"
+	btn_mov.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	UIThemeHelper.apply_btn_primary(btn_mov, 36.0)
+	btn_mov.pressed.connect(func():
+		kosan_modal.visible = false
+		city_manager.start_move_building(_selected_kosan_pos)
+	)
+	act_hb.add_child(btn_mov)

@@ -35,7 +35,9 @@ enum TileType {
 	STOP_BUSWAY,
 	FLYOVER,
 	RUNWAY,
-	AIRPORT_TERMINAL
+	AIRPORT_TERMINAL,
+	KOSAN,
+	UNIVERSITAS
 }
 
 enum BuildingZone {
@@ -65,6 +67,8 @@ const COST_POLICE: int = 100000
 const COST_MILITARY: int = 200000
 const COST_MAYOR_OFFICE: int = 150000
 const COST_FIRE_STATION: int = 120000
+const COST_KOSAN: int = 100000
+const COST_UNIVERSITAS: int = 500000
 const COST_ZONE_MILITARY: int = 2000
 const COST_TRAIN_STATION: int = 150000
 const COST_RAIL: int = 3000
@@ -87,7 +91,9 @@ const PUBLIC_BUILDING_TYPES: Array = [
 	TileType.POLICE,
 	TileType.MILITARY,
 	TileType.MAYOR_OFFICE,
-	TileType.FIRE_STATION
+	TileType.FIRE_STATION,
+	TileType.KOSAN,
+	TileType.UNIVERSITAS
 ]
 
 # Kebijakan Pak Slamet & Parkir (Langkah 5)
@@ -139,6 +145,9 @@ var popularity: float = 70.0 # 0 - 100 (mulai 70, terpisah dari kebahagiaan)
 var integrity: float = 80.0 # 0 - 100 (default 80)
 var security: float = 50.0 # 0 - 100 (mulai 50)
 var health: float = 70.0 # 0 - 100 (mulai 70)
+var education: float = 20.0 # 0 - 100 (mulai 20)
+var pinjaman_bank: Dictionary = {}
+var kosan_data: Dictionary = {}
 var fire_cooldown_months: int = 0 # Maksimal 1x per 12 bulan game
 var active_fire: Dictionary = {} # { "pos": Vector2i, "state": "burning"|"damaged_light"|"damaged_heavy", "months_left": int }
 var insiden_aktif: Dictionary = {} # Insiden aktif (kebakaran, kemalingan, kerusuhan, demo)
@@ -169,7 +178,9 @@ const WISH_DEFS: Array = [
 	{"type": "angkutan", "text": "Pengen ada angkutan umum di dekat rumah"},
 	{"type": "aman", "text": "Pengen kotaku aman"},
 	{"type": "berobat", "text": "Pengen ada tempat berobat di dekat rumah"},
-	{"type": "pasar", "text": "Pengen ada pasar di dekat rumah"}
+	{"type": "pasar", "text": "Pengen ada pasar di dekat rumah"},
+	{"type": "kuliah", "text": "Pengen kuliah di universitas"},
+	{"type": "kosan_kampus", "text": "Pengen kosan dekat kampus"}
 ]
 var city_level: String = "Desa"
 var game_speed: float = 1.0 # 0.0 (Pause), 1.0 (1x), 3.0 (3x)
@@ -302,6 +313,9 @@ func reset_grid() -> void:
 	water_pipes.clear()
 	security = 50.0
 	health = 70.0
+	education = 20.0
+	pinjaman_bank.clear()
+	kosan_data.clear()
 	fire_cooldown_months = 0
 	active_fire.clear()
 	insiden_aktif.clear()
@@ -761,7 +775,28 @@ func is_wish_fulfilled(w_type: String) -> bool:
 			return has_working_public(TileType.CLINIC) or has_working_public(TileType.HOSPITAL)
 		"pasar":
 			return count_public_type(TileType.ZONE_C) >= 1
+		"kuliah":
+			return has_working_public(TileType.UNIVERSITAS)
+		"kosan_kampus":
+			var unis: Array[Vector2i] = get_working_public_positions(TileType.UNIVERSITAS)
+			var kosans: Array[Vector2i] = get_working_public_positions(TileType.KOSAN)
+			for u in unis:
+				for k in kosans:
+					if u.distance_to(k) <= 15.0:
+						return true
+			return false
 	return false
+
+func get_bank_loan_limit() -> int:
+	var raw: int = 500000 + int(round(popularity)) * 5000 + population * 100
+	return int(floor(float(raw) / 50000.0)) * 50000
+
+func get_total_kosan_occupied() -> int:
+	var total: int = 0
+	for k in kosan_data.keys():
+		var kd: Dictionary = kosan_data[k]
+		total += int(kd.get("occupied", 0))
+	return total
 
 func record_monthly_stats() -> void:
 	riwayat_statistik.append({
@@ -806,6 +841,12 @@ func is_public_building_unlocked(target_type: int) -> Dictionary:
 			return {"unlocked": population >= 100, "reason": "Butuh Pop 100"}
 		TileType.FIRE_STATION:
 			return {"unlocked": population >= 100, "reason": "Butuh Pop 100"}
+		TileType.KOSAN:
+			return {"unlocked": population >= 100, "reason": "Butuh Pop 100"}
+		TileType.UNIVERSITAS:
+			if count_public_type(TileType.UNIVERSITAS) >= 1:
+				return {"unlocked": false, "reason": "Satu kota cukup 1 Universitas"}
+			return {"unlocked": population >= 1000 and count_public_type(TileType.SCHOOL) >= 1, "reason": "Butuh Pop 1000 + Sekolah"}
 		TileType.ZONE_MILITARY:
 			return {"unlocked": count_public_type(TileType.MILITARY) >= 1, "reason": "Butuh Markas TNI"}
 		TileType.TRAIN_STATION:
