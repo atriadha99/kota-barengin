@@ -159,6 +159,7 @@ static func save_season2(data: CityData) -> bool:
 	cfg.set_value("city", "last_event_id", data.last_event_id)
 	cfg.set_value("city", "flood_cooldown", data.flood_cooldown)
 	cfg.set_value("city", "riwayat_event", data.riwayat_event.duplicate(true))
+	cfg.set_value("city", "event_visual_aktif", data.event_visual_aktif.duplicate(true))
 	cfg.set_value("city", "keinginan_warga", data.keinginan_warga.duplicate(true))
 	cfg.set_value("city", "riwayat_statistik", data.riwayat_statistik.duplicate(true))
 
@@ -342,6 +343,8 @@ static func load_season2(data: CityData) -> bool:
 	data.flood_cooldown = int(cfg.get_value("city", "flood_cooldown", 0))
 	var ev_r = cfg.get_value("city", "riwayat_event", [])
 	data.riwayat_event = ev_r.duplicate(true) if ev_r is Array else []
+	var ev_va = cfg.get_value("city", "event_visual_aktif", {})
+	data.event_visual_aktif = ev_va.duplicate(true) if ev_va is Dictionary else {}
 	var kw = cfg.get_value("city", "keinginan_warga", {})
 	data.keinginan_warga = kw.duplicate(true) if kw is Dictionary else {}
 	data.ensure_citizen_wishes()

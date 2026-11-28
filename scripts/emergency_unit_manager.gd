@@ -21,6 +21,7 @@ class EmergencyUnit:
 	var patrol_nxt: Vector2i = Vector2i(-1, -1)
 	var node: Node3D = null
 	var lamp_node: MeshInstance3D = null
+	var spray_node: MeshInstance3D = null
 	var status_label: Label3D = null
 
 var units: Array[EmergencyUnit] = []
@@ -231,13 +232,19 @@ func _process(delta: float) -> void:
 			u.node.visible = true
 			if u.lamp_node and is_instance_valid(u.lamp_node):
 				u.lamp_node.visible = lamp_on
+			if u.spray_node and is_instance_valid(u.spray_node):
+				u.spray_node.visible = false
 			_move_along_path(u, delta)
 		elif u.status == "Di Lokasi":
 			u.node.visible = true
 			if u.lamp_node and is_instance_valid(u.lamp_node):
 				u.lamp_node.visible = lamp_on
+			if u.spray_node and is_instance_valid(u.spray_node):
+				u.spray_node.visible = (u.kind == "damkar")
 			_update_unit_label(u)
 		else:
+			if u.spray_node and is_instance_valid(u.spray_node):
+				u.spray_node.visible = false
 			# Siaga di markas: 1 mobil polisi berpatroli pelan keliling kota jika ada jalan
 			if u.kind == "polisi" and not patrol_assigned and city_data.insiden_aktif.is_empty():
 				patrol_assigned = true
@@ -454,6 +461,15 @@ func _create_unit_visual(u: EmergencyUnit) -> void:
 	lbl.position = Vector3(0.0, body_sz.y + 0.45, 0.0)
 	lbl.visible = false
 	root.add_child(lbl)
+
+	if u.kind == "damkar":
+		var spray := MeshInstance3D.new()
+		spray.mesh = _get_box("u_water_spray", Vector3(0.08, 0.08, 1.35))
+		spray.material_override = _get_mat("u_spray_mat", Color(0.35, 0.78, 1.0), true)
+		spray.position = Vector3(0.0, 0.36, -1.05)
+		spray.visible = false
+		root.add_child(spray)
+		u.spray_node = spray
 
 	add_child(root)
 	u.node = root

@@ -157,6 +157,7 @@ var event_cooldown: int = 2
 var last_event_id: String = ""
 var flood_cooldown: int = 0
 var riwayat_event: Array = []
+var event_visual_aktif: Dictionary = {}
 var keinginan_warga: Dictionary = {}
 var riwayat_statistik: Array = []
 

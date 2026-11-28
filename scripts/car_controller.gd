@@ -5,6 +5,7 @@ extends Node3D
 
 class SimpleCar:
 	var node: Node3D
+	var brake_light: MeshInstance3D = null
 	var prev_tile: Vector2i = Vector2i(-1, -1)
 	var current_tile: Vector2i = Vector2i(-1, -1)
 	var target_tile: Vector2i = Vector2i(-1, -1)
@@ -20,6 +21,7 @@ var city_data: CityData
 var speed_multiplier: float = 1.0
 var is_angkot_ngetem_active: bool = false
 var traffic_red_light: bool = false
+var _jam_marker: Node3D = null
 
 func setup(p_city_data: CityData) -> void:
 	city_data = p_city_data
@@ -69,10 +71,26 @@ func _create_car_models() -> void:
 				wheel.position = Vector3(wx, 0.08, wz)
 				car_node.add_child(wheel)
 
+		# Lampu rem merah kecil (menyala saat antre macet / lampu merah)
+		var bl := MeshInstance3D.new()
+		var bl_box := BoxMesh.new()
+		bl_box.size = Vector3(0.32, 0.06, 0.05)
+		var bl_mat := StandardMaterial3D.new()
+		bl_mat.albedo_color = Color(0.95, 0.14, 0.14)
+		bl_mat.emission_enabled = true
+		bl_mat.emission = Color(1.0, 0.15, 0.15)
+		bl_mat.emission_energy_multiplier = 1.4
+		bl.mesh = bl_box
+		bl.material_override = bl_mat
+		bl.position = Vector3(0.0, 0.18, 0.41)
+		bl.visible = false
+		car_node.add_child(bl)
+
 		add_child(car_node)
 
 		var car_obj := SimpleCar.new()
 		car_obj.node = car_node
+		car_obj.brake_light = bl
 		cars.append(car_obj)
 
 func _process(delta: float) -> void:
@@ -92,6 +110,14 @@ func _process(delta: float) -> void:
 			car.node.visible = false
 		return
 
+	# Deteksi titik macet (Pak Slamet aktif atau lampu merah) untuk ikon macet & antrean
+	var jam_tile: Vector2i = Vector2i(-1, -1)
+	if city_data.pak_slamet_status.get("state", "") == "active":
+		var pt = city_data.pak_slamet_status.get("active_tile", Vector2i(-1, -1))
+		if pt is Vector2i:
+			jam_tile = pt
+	_update_jam_marker(jam_tile)
+
 	# Update tiap mobil
 	for i in range(cars.size()):
 		var car: SimpleCar = cars[i]
@@ -106,8 +132,12 @@ func _process(delta: float) -> void:
 			car.node.visible = true
 
 		var flood_slow := 0.5 if city_data.event_aktif.get("id", "") == "banjir" else 1.0
+		var near_jam: bool = (jam_tile != Vector2i(-1, -1) and car.current_tile.distance_to(jam_tile) <= 2.2)
+		var jam_slow: float = 0.25 if near_jam else 1.0
 		var light_mult := 0.0 if (traffic_red_light and _is_intersection_tile(car.current_tile)) else 1.0
-		car.progress += car.speed * speed_multiplier * flood_slow * light_mult * delta
+		if car.brake_light and is_instance_valid(car.brake_light):
+			car.brake_light.visible = (near_jam or light_mult == 0.0)
+		car.progress += car.speed * speed_multiplier * flood_slow * jam_slow * light_mult * delta
 		if car.progress >= 1.0:
 			car.progress = 0.0
 			car.prev_tile = car.current_tile
@@ -134,6 +164,29 @@ func _process(delta: float) -> void:
 
 	_process_transit(delta, road_tiles)
 	_process_airplanes(delta)
+
+func _update_jam_marker(jam_tile: Vector2i) -> void:
+	if jam_tile == Vector2i(-1, -1) or not city_data.is_valid_tile(jam_tile.x, jam_tile.y):
+		if _jam_marker and is_instance_valid(_jam_marker):
+			_jam_marker.visible = false
+		return
+	if not _jam_marker or not is_instance_valid(_jam_marker):
+		_jam_marker = Node3D.new()
+		var tri := MeshInstance3D.new()
+		var pm := PrismMesh.new()
+		pm.size = Vector3(0.45, 0.40, 0.12)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.98, 0.28, 0.22)
+		mat.emission_enabled = true
+		mat.emission = Color(0.98, 0.28, 0.22)
+		mat.emission_energy_multiplier = 0.9
+		tri.mesh = pm
+		tri.material_override = mat
+		tri.position = Vector3(0.0, 1.35, 0.0)
+		_jam_marker.add_child(tri)
+		add_child(_jam_marker)
+	_jam_marker.visible = true
+	_jam_marker.global_position = CityData.tile_to_world_pos(jam_tile.x, jam_tile.y)
 
 func _is_road(tile: Vector2i) -> bool:
 	if not city_data.is_valid_tile(tile.x, tile.y):

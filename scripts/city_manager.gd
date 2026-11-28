@@ -1532,12 +1532,14 @@ func _spawn_incident(inc_type: String, pos: Vector2i) -> void:
 		citizen_manager.trigger_custom_complaint(msg_type, "Blok (%d, %d)" % [pos.x, pos.y])
 	show_toast.emit("%s terjadi di (%d, %d)! Cek Balai Kota / klik lokasi." % [title_txt, pos.x, pos.y])
 	_refresh_all_visuals()
+	_rebuild_event_visuals()
 
 func _clear_active_incident() -> void:
 	city_data.insiden_aktif.clear()
 	if emergency_manager:
 		emergency_manager.recall_units_for_resolved_incident()
 	_refresh_all_visuals()
+	_rebuild_event_visuals()
 	city_updated.emit(city_data)
 
 func _on_emergency_unit_arrived(kind: String, _target_pos: Vector2i) -> void:
@@ -1950,37 +1952,130 @@ func _rebuild_event_visuals() -> void:
 	for child in event_props_root.get_children():
 		event_props_root.remove_child(child)
 		child.queue_free()
-	if city_data.event_aktif.is_empty():
+
+	var ev_id: String = str(city_data.event_aktif.get("id", "")) if not city_data.event_aktif.is_empty() else ""
+	var inc_type: String = str(city_data.insiden_aktif.get("type", "")) if not city_data.insiden_aktif.is_empty() else ""
+	if ev_id.is_empty() and inc_type.is_empty():
+		city_data.event_visual_aktif.clear()
 		return
-	var ev_id: String = str(city_data.event_aktif.get("id", ""))
-	var center := CityData.tile_to_world_pos(7, 7)
-	var m := MeshInstance3D.new()
-	var b := BoxMesh.new()
-	var mat := StandardMaterial3D.new()
+
+	var park_list: Array[Vector2i] = city_data.get_public_positions(CityData.TileType.PARK)
+	var th_list: Array[Vector2i] = city_data.get_public_positions(CityData.TileType.TOWNHALL)
+	var fest_tile: Vector2i = park_list[0] if not park_list.is_empty() else (th_list[0] if not th_list.is_empty() else Vector2i(7, 7))
+	var fest_center: Vector3 = CityData.tile_to_world_pos(fest_tile.x, fest_tile.y)
+	var th_tile: Vector2i = th_list[0] if not th_list.is_empty() else Vector2i(7, 7)
+	var th_center: Vector3 = CityData.tile_to_world_pos(th_tile.x, th_tile.y)
+
+	city_data.event_visual_aktif = {"event_id": ev_id, "incident_type": inc_type}
+
 	if ev_id == "kuliner":
-		b.size = Vector3(1.2, 0.65, 1.2)
-		mat.albedo_color = Color(0.95, 0.55, 0.20)
-		m.position = center + Vector3(2.0, 0.35, 0.0)
+		_spawn_festival_tents(fest_center, false)
+		_spawn_event_crowd(fest_center, 6, "festival kulinernya rame banget!", false)
 	elif ev_id == "pasar_malam":
-		b.size = Vector3(1.4, 0.70, 1.4)
-		mat.albedo_color = Color(0.85, 0.25, 0.75)
-		mat.emission_enabled = true
-		mat.emission = Color(0.95, 0.45, 0.85)
-		m.position = center + Vector3(-2.0, 0.35, 0.0)
+		_spawn_festival_tents(fest_center, true)
+		_spawn_event_crowd(fest_center, 6, "pasar malamnya seru, anak-anak seneng!", false)
 	elif ev_id == "17an":
-		b.size = Vector3(0.25, 1.6, 0.25)
-		mat.albedo_color = Color(0.92, 0.15, 0.15)
-		m.position = center + Vector3(0.0, 0.8, 2.0)
+		_spawn_17an_flags(fest_center)
+		_spawn_event_crowd(fest_center, 6, "17-an tahun ini meriah banget!", false)
 	elif ev_id == "banjir":
-		b.size = Vector3(3.8, 0.06, 2.0)
-		mat.albedo_color = Color(0.22, 0.48, 0.78, 0.72)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.position = center + Vector3(0.0, 0.05, 2.0)
-	else:
-		return
-	m.mesh = b
-	m.material_override = mat
-	event_props_root.add_child(m)
+		var b_mat := StandardMaterial3D.new()
+		b_mat.albedo_color = Color(0.22, 0.48, 0.78, 0.72)
+		b_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		var b_box := BoxMesh.new()
+		b_box.size = Vector3(1.9, 0.05, 1.9)
+		for ox in [0.0, 2.0]:
+			var m := MeshInstance3D.new()
+			m.mesh = b_box
+			m.material_override = b_mat
+			m.position = fest_center + Vector3(ox, 0.04, 2.0)
+			event_props_root.add_child(m)
+
+	if ev_id == "demo" or inc_type == "demo":
+		_spawn_event_crowd(th_center + Vector3(0.0, 0.0, 1.4), 10, "kami mau perubahan!", true)
+	elif inc_type == "kerusuhan":
+		var rpos: Vector2i = city_data.insiden_aktif.get("pos", Vector2i(7, 7))
+		if city_data.is_valid_tile(rpos.x, rpos.y):
+			var r_center: Vector3 = CityData.tile_to_world_pos(rpos.x, rpos.y)
+			_spawn_event_crowd(r_center + Vector3(0.0, 0.0, 1.2), 10, "Kami marah!", false)
+
+func _spawn_festival_tents(center: Vector3, is_night_market: bool) -> void:
+	var tent_colors: Array[Color] = [Color(0.95, 0.45, 0.18), Color(0.22, 0.68, 0.86), Color(0.92, 0.78, 0.22)]
+	var offsets: Array[Vector3] = [Vector3(-1.4, 0.0, -0.8), Vector3(1.4, 0.0, -0.8), Vector3(0.0, 0.0, 1.1)]
+	for i in range(3):
+		var stall := MeshInstance3D.new()
+		var sm := BoxMesh.new()
+		sm.size = Vector3(0.9, 0.65, 0.9)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = tent_colors[i]
+		if is_night_market:
+			mat.emission_enabled = true
+			mat.emission = tent_colors[i]
+			mat.emission_energy_multiplier = 0.75
+		stall.mesh = sm
+		stall.material_override = mat
+		stall.position = center + offsets[i] + Vector3(0.0, 0.34, 0.0)
+		event_props_root.add_child(stall)
+		if not is_night_market and i < 2:
+			var steam := MeshInstance3D.new()
+			var st_m := BoxMesh.new()
+			st_m.size = Vector3(0.22, 0.32, 0.22)
+			var st_mat := StandardMaterial3D.new()
+			st_mat.albedo_color = Color(0.95, 0.95, 0.98, 0.65)
+			st_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			steam.mesh = st_m
+			steam.material_override = st_mat
+			steam.position = center + offsets[i] + Vector3(0.0, 0.95, 0.0)
+			event_props_root.add_child(steam)
+
+func _spawn_17an_flags(center: Vector3) -> void:
+	var pole_m := BoxMesh.new()
+	pole_m.size = Vector3(0.08, 1.5, 0.08)
+	var flag_m := BoxMesh.new()
+	flag_m.size = Vector3(0.45, 0.26, 0.05)
+	var pole_mat := StandardMaterial3D.new()
+	pole_mat.albedo_color = Color(0.85, 0.85, 0.88)
+	var red_mat := StandardMaterial3D.new()
+	red_mat.albedo_color = Color(0.92, 0.16, 0.16)
+	for ox in [-2.2, 0.0, 2.2]:
+		var p := MeshInstance3D.new()
+		p.mesh = pole_m
+		p.material_override = pole_mat
+		p.position = center + Vector3(ox, 0.75, 1.4)
+		event_props_root.add_child(p)
+		var fl := MeshInstance3D.new()
+		fl.mesh = flag_m
+		fl.material_override = red_mat
+		fl.position = center + Vector3(ox + 0.22, 1.32, 1.4)
+		event_props_root.add_child(fl)
+
+func _spawn_event_crowd(center: Vector3, count: int, bubble_txt: String, with_placards: bool) -> void:
+	var safe_count: int = mini(count, 12)
+	for i in range(safe_count):
+		var rig: Dictionary = S1VisualBuilder.create_citizen_rig(i, false)
+		var c_node: Node3D = rig["root"] as Node3D
+		var angle: float = (float(i) / float(safe_count)) * TAU
+		var rad: float = 1.0 + float(i % 2) * 0.55
+		c_node.position = center + Vector3(cos(angle) * rad, 0.0, sin(angle) * rad)
+		c_node.rotation.y = -angle
+		event_props_root.add_child(c_node)
+		if i == 0:
+			var b_lbl := Label3D.new()
+			b_lbl.text = bubble_txt
+			b_lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			b_lbl.font_size = 20
+			b_lbl.outline_size = 4
+			b_lbl.modulate = Color(1.0, 0.96, 0.75)
+			b_lbl.position = Vector3(0.0, 1.65, 0.0)
+			c_node.add_child(b_lbl)
+		if with_placards and i < 3:
+			var sign_lbl := Label3D.new()
+			sign_lbl.text = "KAMI MAU PERUBAHAN!"
+			sign_lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sign_lbl.font_size = 16
+			sign_lbl.outline_size = 3
+			sign_lbl.modulate = Color(1.0, 0.85, 0.30)
+			sign_lbl.position = Vector3(0.0, 1.35, 0.0)
+			c_node.add_child(sign_lbl)
 
 func _process_citizen_wishes_monthly() -> void:
 	city_data.ensure_citizen_wishes()
